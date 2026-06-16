@@ -1,19 +1,16 @@
 name: 每週千張大戶自動爬取
 
 on:
-  # ── 每週五 18:30 台灣時間（UTC+8）自動執行
   schedule:
-    - cron: '30 10 * * 5'   # UTC 10:30 = 台灣 18:30
-
-  # ── 也可以手動觸發（網頁按按鈕）
+    - cron: '30 10 * * 5'   # 每週五 18:30 台灣時間
   workflow_dispatch:
     inputs:
       stocks:
-        description: '股票代號（逗號分隔，留空用預設清單）'
+        description: '股票代號（逗號分隔，空白用預設）'
         required: false
         default: ''
       weeks:
-        description: '抓幾週歷史資料'
+        description: '抓幾週歷史'
         required: false
         default: '8'
 
@@ -21,44 +18,55 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     permissions:
-      contents: write    # 讓 Actions 可以 commit 回 repo
+      contents: write
 
     steps:
-      # 1. 取得程式碼
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. 設定 Python 環境
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 3. 安裝套件
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # 4. 執行爬蟲
+      - name: 測試連線（debug）
+        run: |
+          python3 -c "
+          import requests
+          s = requests.Session()
+          s.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0.0.0'
+          r = s.get('https://stock.wearn.com/', timeout=10)
+          print('首頁 status:', r.status_code)
+          r2 = s.get('https://stock.wearn.com/holders.asp?kind=2330&d=1150612', timeout=10)
+          print('目標頁 status:', r2.status_code)
+          import chardet
+          enc = chardet.detect(r2.content)
+          print('偵測編碼:', enc)
+          html = r2.content.decode(enc.get('encoding','big5'), errors='replace')
+          print('前500字:', html[:500])
+          "
+
       - name: Run scraper
         env:
-          # 手動觸發時可傳入參數
           INPUT_STOCKS: ${{ github.event.inputs.stocks }}
           INPUT_WEEKS:  ${{ github.event.inputs.weeks || '8' }}
         run: python scripts/scraper.py
 
-      # 5. 把結果 commit 回 repo（data/ 資料夾）
       - name: Commit results
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/
-          git diff --staged --quiet || git commit -m "📊 自動更新千張大戶資料 $(date +'%Y/%m/%d')"
+          git diff --staged --quiet || git commit -m "📊 更新千張大戶資料 $(date +'%Y/%m/%d')"
           git push
 
-      # 6. 同時上傳 Excel 成 Artifact（可直接下載）
-      - name: Upload Excel artifact
+      - name: Upload artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: 千張大戶週報_${{ github.run_number }}
-          path: data/*.xlsx
+          path: data/
           retention-days: 30

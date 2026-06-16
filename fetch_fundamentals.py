@@ -17,7 +17,7 @@ pip install finmind pandas openpyxl requests
 import os, time
 import pandas as pd
 
-TICKERS = ["2464", "4576", "2049", "9942"]   # 群創 國巨 緯穎 瑞昱（可自行替換）
+TICKERS = ["3481", "2327", "6669", "1560", "8210", "2379"]   # 群創 國巨 緯穎 瑞昱（可自行替換）
 START_DATE = "2024-01-01"
 TOKEN = os.environ.get("FINMIND_TOKEN", "")   # 建議設環境變數；空字串也能跑(額度低)
 OUTPUT = "台股基本面_v2.xlsx"

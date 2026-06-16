@@ -24,7 +24,7 @@ import os, time
 import pandas as pd
 
 # 預設:國泰金、元大金、台新新光金、永豐金、兆豐金、中信金(可自行替換)
-TICKERS = ["2882", "2885", "2887", "2890", "2886", "2891", "2812", "2851", "2881", "2884", "2883"]
+TICKERS = ["2882", "2885", "2887", "2890", "2886", "2891"]
 START_DATE = "2024-01-01"
 TOKEN = os.environ.get("FINMIND_TOKEN", "")
 OUTPUT = "台股金融股比較.xlsx"
@@ -79,26 +79,28 @@ def fin_metrics(raw):
     if inc.empty or bal.empty:
         return pd.DataFrame(), None
 
-    ni  = pick(inc, "IncomeAfterTaxes", "ProfitAfterTax", "NetIncome")
+    # ★ 金融股稅後淨利欄位是 IncomeAfterTax(單數);工業股才是 IncomeAfterTaxes(複數)
+    ni  = pick(inc, "IncomeAfterTax", "IncomeAfterTaxes", "ProfitAfterTax",
+                    "TotalConsolidatedProfitForThePeriod", "NetIncome")
     eps = pick(inc, "EPS")
     rev = pick(inc, "Revenue", "NetRevenue", "TotalOperatingRevenue")  # 金融股=淨收益,可能不存在
 
     ta  = pick(bal, "TotalAssets", "Total_Assets")
     tl  = pick(bal, "TotalLiabilities", "Liabilities", "Total_Liabilities")
     eq  = pick(bal, "Equity", "TotalEquity", "EquityAttributableToOwnersOfParent")
+    # ★ 每股淨值改用股本反推股數(普通股股本÷面額10),比用 EPS 反推穩(最新季 EPS 常缺值)
+    share_cap = pick(bal, "OrdinaryShare", "CommonStock", "ShareCapitalCommonStock")
+    shares = share_cap / 10.0
 
-    # 用 EPS 反推流通股數(避免另抓股本) → 算每股淨值 BVPS
-    shares = (ni / eps).replace([float("inf"), float("-inf")], pd.NA)
-
-    m = pd.DataFrame(index=inc.index)
-    m["稅後淨利(億)"] = (ni / 1e8).round(1)
-    m["EPS"]        = eps.round(2)
+    m = pd.DataFrame(index=bal.index)               # ★ 以資產負債表日期為基準,對齊較穩
+    m["稅後淨利(億)"] = (ni.reindex(bal.index) / 1e8).round(1)
+    m["EPS"]        = eps.reindex(bal.index).round(2)
     if rev.notna().any():
-        m["淨利率%"] = (ni / rev * 100).round(2)
+        m["淨利率%"] = (ni.reindex(bal.index) / rev.reindex(bal.index) * 100).round(2)
     m["股東權益(億)"] = (eq / 1e8).round(0)
     m["每股淨值"]   = (eq / shares).round(2)
-    m["ROE%(季)"]   = (ni / eq * 100).round(2)
-    m["ROA%(季)"]   = (ni / ta * 100).round(3)
+    m["ROE%(季)"]   = (ni.reindex(bal.index) / eq * 100).round(2)
+    m["ROA%(季)"]   = (ni.reindex(bal.index) / ta * 100).round(3)
     m["負債比%"]    = (tl / ta * 100).round(1)   # 金融股 90%+ 屬常態,僅供參考
     return m, shares
 

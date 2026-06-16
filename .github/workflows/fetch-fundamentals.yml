@@ -1,0 +1,66 @@
+name: 台股基本面定時抓取
+
+# ── 觸發條件 ───────────────────────────────
+on:
+  workflow_dispatch:          # 可在 Actions 頁面手動按鈕執行
+  schedule:
+    # GitHub cron 用 UTC。06:00 UTC = 台北 14:00（收盤後）
+    # 每週六跑一次，順便涵蓋每月 10 號前後公布的月營收 / 季報
+    - cron: "0 6 * * 6"
+
+# 若要 commit 回 repo 留存歷史，需要寫入權限
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4          # 最新可用 v6；v4 穩定不棄用
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install FinMind pandas openpyxl requests lxml
+
+      - name: Run fetcher
+        env:
+          # 在 repo → Settings → Secrets and variables → Actions
+          # 新增 secret 名稱 FINMIND_TOKEN（沒有也能跑，額度較低）
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python fetch_fundamentals.py
+
+      # ── 產物保存 1：存成 artifact（一定執行）──────────
+      - name: Upload Excel as artifact
+        uses: actions/upload-artifact@v4   # 最新可用 v7；v4 穩定不棄用
+        with:
+          name: taiwan-fundamentals
+          path: "*.xlsx"
+          if-no-files-found: error
+          retention-days: 90
+
+      # ── 產物保存 2（可選）：commit 回 repo 的 data/ 留歷史 ──
+      - name: Commit output to repo
+        run: |
+          mkdir -p data
+          STAMP=$(date -u +%Y%m%d)
+          # 把產出檔複製成帶日期的檔名，保留每次快照
+          for f in *.xlsx; do cp "$f" "data/${STAMP}_${f}"; done
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "沒有新檔案，略過 commit"
+          else
+            git commit -m "data: 自動更新台股基本面 ${STAMP}"
+            git push
+          fi

@@ -29,7 +29,7 @@ import os, time
 import numpy as np
 import pandas as pd
 
-TICKERS = ["2330", "2379", "2408", "3231", "6274"]  # 台積電 瑞昱 南亞科 緯創 台燿
+TICKERS = ["2330", "2454", "2379", "2408", "3231", "6274"]  # 台積電 聯發科 瑞昱 南亞科 緯創 台燿
 START_FUND = "2019-01-01"     # 財報/月營收/PER 歷史(算百分位)
 START_PRICE = "2023-06-01"    # 每日股價(算斜率/52週高)
 BENCHMARK = "0050"
@@ -111,6 +111,22 @@ def log_slope(prices):
     x = np.arange(len(p))
     return float(np.polyfit(x, np.log(p.values), 1)[0])
 
+def find_capex(cf):
+    """穩健抓資本支出:先試精確名,再模糊比對(含 Propert + Plant/Equipment),
+    取現金流出最大(總和最負)那條,避免漏抓或誤抓處分利益。"""
+    for n in ("AcquisitionOfPropertyPlantAndEquipment",
+              "PaymentsToAcquirePropertyPlantAndEquipment",
+              "PurchaseOfPropertyPlantAndEquipment",
+              "PropertyAndPlantAndEquipment"):
+        if n in cf.columns:
+            return cf[n]
+    cands = [c for c in cf.columns
+             if "Propert" in c and ("Plant" in c or "Equipment" in c) and not c.endswith("_per")]
+    if cands:
+        best = min(cands, key=lambda c: pd.to_numeric(cf[c], errors="coerce").sum())  # 最負=最大流出
+        return cf[best]
+    return pd.Series(index=cf.index, dtype="float64")
+
 
 # ---------- 基本面四關 ----------
 def gate_growth(raw):
@@ -125,16 +141,17 @@ def gate_growth(raw):
 def gate_cash(raw):
     inc, cf = pivot(raw["inc"]), pivot(raw["cf"])
     if inc.empty or cf.empty:
-        return None, None
+        return None, None, {}
     ni  = pick(inc, "IncomeAfterTaxes", "IncomeAfterTax", "ProfitAfterTax")
     ocf = pick(cf, "CashFlowsFromOperatingActivities",
                    "NetCashFlowsFromOperatingActivities", "CashProvidedByOperatingActivities")
-    cap = pick(cf, "PropertyAndPlantAndEquipment",
-                   "AcquisitionOfPropertyPlantAndEquipment", "PaymentsToAcquirePropertyPlantAndEquipment")
+    cap = find_capex(cf)
     ni4, ocf4, cap4 = ni.dropna().tail(4).sum(), ocf.dropna().tail(4).sum(), cap.dropna().tail(4).sum()
     cashq = round(ocf4 / ni4, 2) if ni4 else None
     fcf4  = round((ocf4 + cap4) / 1e8, 1)
-    return cashq, fcf4
+    audit = {"近四季OCF(億)": round(ocf4/1e8,1), "近四季淨利(億)": round(ni4/1e8,1),
+             "近四季capex(億)": round(cap4/1e8,1), "capex欄位": cap.name}
+    return cashq, fcf4, audit
 
 def roe_roic_series(raw):
     inc, bal = pivot(raw["inc"]), pivot(raw["bal"])
@@ -203,7 +220,7 @@ def assess(sid, raw, bench):
     pos, win = gate_growth(raw)
     r["營收正成長"] = f"{pos}/{win}" if pos is not None else "—"
     g1 = pos is not None and pos >= RULES["grow_months"]
-    cashq, fcf = gate_cash(raw)
+    cashq, fcf, cash_audit = gate_cash(raw)
     r["含金量"], r["近四季FCF"] = cashq, fcf
     g2 = cashq is not None and cashq >= RULES["cashq_min"] and fcf is not None and fcf > 0
     per = raw["per"]; pe = pb = pe_p = pb_p = None
@@ -244,21 +261,43 @@ def assess(sid, raw, bench):
     elif fund >= 3 and not g5: r["分類"] = "◎ 潛伏(好公司資金未到)"
     elif fund >= 2 and g5:     r["分類"] = "○ 偏多"
     else:                      r["分類"] = "— 不符"
-    return r
+
+    # 計算稽核(中間值,供逐項核對)
+    def last_date(df, col="date"):
+        try:    return str(pd.to_datetime(df[col]).max().date())
+        except Exception: return "—"
+    per_df = raw["per"]
+    audit = {"代號": sid,
+             **cash_audit,
+             "→含金量(OCF/淨利)": cashq, "→近四季FCF(億)": fcf,
+             "PE現值": r.get("PE"), "PE歷史百分位": r.get("PE百分位"), "PB歷史百分位": r.get("PB百分位"),
+             "近四季ROE%": r.get("ROE%"), "近四季ROIC%": r.get("ROIC%")}
+    fresh = {"代號": sid,
+             "財報最新季": last_date(raw["inc"]) if raw["inc"] is not None and not raw["inc"].empty else "—",
+             "月營收最新": last_date(raw["rev"]) if raw["rev"] is not None and not raw["rev"].empty else "—",
+             "股價最新": str(raw["price"].index.max().date()) if raw["price"] is not None and not raw["price"].empty else "—",
+             "PER最新": last_date(per_df) if per_df is not None and not per_df.empty else "—"}
+    return r, audit, fresh
 
 
 # ---------- 主流程 ----------
+DUMP_RAW = True          # 是否輸出每檔原始三表(供逐列驗證);檔案會變大
+RAW_TAIL = 12            # 原始表只保留最近 N 季,控制檔案大小
+
 def main():
     dl = make_loader()
     bench = fetch_price(dl, BENCHMARK, START_PRICE)
     bench = bench["close"] if not bench.empty else pd.Series(dtype=float)
-    rows = []
+    rows, audits, freshes, raws = [], [], [], {}
     for sid in TICKERS:
         print(f"評估 {sid} ...")
         try:
-            rows.append(assess(sid, fetch_all(dl, sid), bench))
+            raw = fetch_all(dl, sid)
+            r, audit, fresh = assess(sid, raw, bench)
+            rows.append(r); audits.append(audit); freshes.append(fresh); raws[sid] = raw
         except Exception as e:
             print(f"  ! {sid} 失敗:{e}")
+
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.sort_values("總評分", ascending=False)
@@ -266,7 +305,27 @@ def main():
                 "營收正成長", "含金量", "近四季FCF", "PE", "PE百分位", "PB百分位",
                 "ROE%", "ROE百分位", "ROIC%", "ROIC百分位", "相對報酬%", "週斜率%", "RS創高", "亮燈"]
         df = df[[c for c in cols if c in df.columns]]
-    df.to_excel(OUTPUT, sheet_name="五維總篩選", index=False)
+
+    with pd.ExcelWriter(OUTPUT, engine="openpyxl") as xw:
+        df.to_excel(xw, sheet_name="五維總篩選", index=False)
+        # 計算稽核:中間值,可自行除一遍對
+        if audits:
+            acols = ["代號", "近四季OCF(億)", "近四季淨利(億)", "近四季capex(億)", "capex欄位",
+                     "→含金量(OCF/淨利)", "→近四季FCF(億)", "PE現值", "PE歷史百分位",
+                     "PB歷史百分位", "近四季ROE%", "近四季ROIC%"]
+            ad = pd.DataFrame(audits)
+            ad[[c for c in acols if c in ad.columns]].to_excel(xw, sheet_name="計算稽核", index=False)
+        # 資料時效:看各資料集最新到哪天(滯後性一眼可見)
+        if freshes:
+            pd.DataFrame(freshes).to_excel(xw, sheet_name="資料時效", index=False)
+        # 每檔原始三表 + 月營收(逐列核對來源)
+        if DUMP_RAW:
+            for sid, raw in raws.items():
+                for key, label in [("inc","損益表"),("bal","資產負債"),("cf","現金流"),("rev","月營收")]:
+                    d = raw.get(key)
+                    if d is not None and not d.empty:
+                        d.tail(RAW_TAIL*40 if key!="rev" else 30).to_excel(
+                            xw, sheet_name=f"{sid}_{label}"[:31], index=False)
     print(f"\n已輸出:{OUTPUT}\n")
     pd.set_option("display.unicode.east_asian_width", True); pd.set_option("display.width", 260)
     show = [c for c in ["代號","總評分","分類","五關","卡在","基本面","共振分數"] if c in df.columns]

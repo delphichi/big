@@ -86,6 +86,34 @@ def pctile(series, value):
         return None
     return round((s <= value).mean() * 100, 1)
 
+def to_single_q(s):
+    """現金流量表是『年初至今累計』,還原成單季:同年內=本季累計−上季累計,Q1不變。
+    (損益表 FinMind 已是單季,不可套用此函式)"""
+    s = pd.to_numeric(s, errors="coerce").dropna()
+    if s.empty:
+        return s
+    s.index = pd.to_datetime(s.index); s = s.sort_index()
+    out, prev, prevy = [], None, None
+    for dt, v in s.items():
+        q = (dt.month - 1) // 3 + 1
+        out.append(v if (q == 1 or prev is None or dt.year != prevy) else v - prev)
+        prev, prevy = v, dt.year
+    return pd.Series(out, index=s.index)
+
+def find_capex(cf):
+    """穩健抓資本支出:先試精確名,再模糊比對(含 Propert + Plant/Equipment),取流出最大者。"""
+    for n in ("AcquisitionOfPropertyPlantAndEquipment",
+              "PaymentsToAcquirePropertyPlantAndEquipment",
+              "PurchaseOfPropertyPlantAndEquipment",
+              "PropertyAndPlantAndEquipment"):
+        if n in cf.columns:
+            return cf[n]
+    cands = [c for c in cf.columns
+             if "Propert" in c and ("Plant" in c or "Equipment" in c) and not c.endswith("_per")]
+    if cands:
+        return cf[min(cands, key=lambda c: pd.to_numeric(cf[c], errors="coerce").sum())]
+    return pd.Series(index=cf.index, dtype="float64")
+
 
 # ---------- 關1:營收動能 ----------
 def gate_growth(raw):
@@ -107,11 +135,11 @@ def gate_cash(raw):
     ni  = pick(inc, "IncomeAfterTaxes", "IncomeAfterTax", "ProfitAfterTax")
     ocf = pick(cf, "CashFlowsFromOperatingActivities",
                    "NetCashFlowsFromOperatingActivities", "CashProvidedByOperatingActivities")
-    cap = pick(cf, "PropertyAndPlantAndEquipment",
-                   "AcquisitionOfPropertyPlantAndEquipment", "PaymentsToAcquirePropertyPlantAndEquipment")
+    cap = find_capex(cf)
+    # 現金流量表是累計值 → 先還原單季再加總;損益表已是單季,不動
     ni4  = ni.dropna().tail(4).sum()
-    ocf4 = ocf.dropna().tail(4).sum()
-    cap4 = cap.dropna().tail(4).sum()
+    ocf4 = to_single_q(ocf).tail(4).sum()
+    cap4 = to_single_q(cap).tail(4).sum()
     cashq = round(ocf4 / ni4, 2) if ni4 else None
     fcf4  = round((ocf4 + cap4) / 1e8, 1)          # capex 多為負值
     return cashq, fcf4

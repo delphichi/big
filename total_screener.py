@@ -15,21 +15,23 @@
 
   總評分 = 基本面通過比 ×50 + 共振分數 ×0.5   (0-100)
 
-  自動分類:
-    ★ 主流   = 基本面≥3關 且 資金面達標   → 基本面與資金同向(最強)
-    ⚠ 純資金 = 資金面達標 但 基本面≤1關    → 投機/軋空,慎防假突破
-    ◎ 潛伏   = 基本面≥3關 但 資金面未達標  → 好公司資金未到,觀察清單
-    ○ 偏多 / — 不符
+  自動分類:見 assess() 內 9 類。
 
 資料源:FinMind。大盤基準預設 0050。歷史建議 5 年(百分位)+ 2 年股價(斜率/52週高)。
 pip install finmind pandas numpy openpyxl requests
+
+── 2026-06-17 Claude 修正(三個會影響篩選/分類結果的真 bug)──
+  修1 含金量在虧損(ni4<=0)時無意義 → cashq 設 None;且分類 burn_now 加「虧損也算燒錢」,
+       否則 ni4<0 且 ocf4<0 會負負得正(cashq>0.8)讓真·燒錢股漏判。
+  修2 capex 符號不穩(FinMind 有時存正值) → FCF 一律用 ocf4 - abs(cap4),不論存正負都當流出扣除。
+  修3 虧損時 PE<=0 不算便宜 → 估值關在 pe<=0 時不適用(None);百分位只用正值歷史,避免負PE誤判便宜。
 """
 
 import os, time
 import numpy as np
 import pandas as pd
 
-TICKERS = ["2412", "2912", "1476", "1560", "9942", "2360"]  # 台積電 聯發科 瑞昱 南亞科 緯創 台燿
+TICKERS = ["2330", "2454", "2379", "2408", "3231", "6274"]  # 台積電 聯發科 瑞昱 南亞科 緯創 台燿
 START_FUND = "2019-01-01"     # 財報/月營收/PER 歷史(算百分位)
 START_PRICE = "2023-06-01"    # 每日股價(算斜率/52週高)
 BENCHMARK = "0050"
@@ -169,8 +171,10 @@ def gate_cash(raw):
     ni4  = ni.dropna().tail(4).sum()
     ocf4 = to_single_q(ocf).tail(4).sum()
     cap4 = to_single_q(cap).tail(4).sum()
-    cashq = round(ocf4 / ni4, 2) if ni4 else None
-    fcf4  = round((ocf4 + cap4) / 1e8, 1)
+    # 修1：虧損(ni4<=0)時含金量無意義 → 設 None(避免負負得正假過/誤分類)
+    cashq = round(ocf4 / ni4, 2) if (ni4 and ni4 > 0) else None
+    # 修2：capex 不論 FinMind 存正或負,一律當現金流出扣除(符號不穩)
+    fcf4  = round((ocf4 - abs(cap4)) / 1e8, 1)
     audit = {"近四季OCF(億)": round(ocf4/1e8,1), "近四季淨利(億)": round(ni4/1e8,1),
              "近四季capex(億)": round(cap4/1e8,1), "capex欄位": cap.name}
     return cashq, fcf4, audit
@@ -248,10 +252,12 @@ def assess(sid, raw, bench):
     per = raw["per"]; pe = pb = pe_p = pb_p = divy = None
     if per is not None and not per.empty:
         per = per.sort_values("date"); pe = per["PER"].iloc[-1]; pb = per["PBR"].iloc[-1]
-        pe_p, pb_p = pctile(per["PER"], pe), pctile(per["PBR"], pb)
+        # 修3：虧損 PE<=0 不算便宜 → 估值關不適用;百分位只用正值歷史(負PE會被誤判便宜)
+        pe_p = pctile(per["PER"][per["PER"] > 0], pe) if (pe is not None and not pd.isna(pe) and pe > 0) else None
+        pb_p = pctile(per["PBR"][per["PBR"] > 0], pb) if (pb is not None and not pd.isna(pb) and pb > 0) else None
         if "dividend_yield" in per.columns:
             divy = per["dividend_yield"].iloc[-1]
-    r["PE"], r["PE百分位"] = (round(pe,1) if pe else None), pe_p
+    r["PE"], r["PE百分位"] = (round(pe,1) if pe is not None and not pd.isna(pe) else None), pe_p
     r["PB百分位"] = pb_p
     r["殖利率%"] = round(divy,2) if divy is not None and not pd.isna(divy) else None
     g3 = pe_p is not None and pb_p is not None and pe_p <= RULES["val_pct_max"] and pb_p <= RULES["val_pct_max"]
@@ -282,7 +288,10 @@ def assess(sid, raw, bench):
     r["總評分"] = score
 
     # ---- 9 類分類(依優先序,先中先定) ----
-    burn_now   = (cashq is not None and cashq < RULES["cashq_min"]) and (fcf is not None and fcf <= 0)
+    # 修1配套：虧損也算燒錢(cashq 在虧損時為 None,原式 cashq<0.8 會漏掉真·燒錢股)
+    ni4_yi     = cash_audit.get("近四季淨利(億)")
+    loss_now   = ni4_yi is not None and ni4_yi <= 0
+    burn_now   = loss_now or ((cashq is not None and cashq < RULES["cashq_min"]) and (fcf is not None and fcf <= 0))
     cheap      = g3
     val_extreme = (pe_p is not None and pe_p >= RULES["val_pct_extreme"])
     hot        = g5

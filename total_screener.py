@@ -29,7 +29,7 @@ import os, time
 import numpy as np
 import pandas as pd
 
-TICKERS = ["2330", "2454", "2379", "2408", "3231", "6274"]  # 台積電 聯發科 瑞昱 南亞科 緯創 台燿
+TICKERS = ["2330", "2379", "2408", "3231", "6274"]  # 台積電 瑞昱 南亞科 緯創 台燿
 START_FUND = "2019-01-01"     # 財報/月營收/PER 歷史(算百分位)
 START_PRICE = "2023-06-01"    # 每日股價(算斜率/52週高)
 BENCHMARK = "0050"

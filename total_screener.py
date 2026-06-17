@@ -111,6 +111,20 @@ def log_slope(prices):
     x = np.arange(len(p))
     return float(np.polyfit(x, np.log(p.values), 1)[0])
 
+def to_single_q(s):
+    """現金流量表是『年初至今累計』,還原成單季:同年內=本季累計−上季累計,Q1不變。
+    (損益表 FinMind 已是單季,不可套用此函式)"""
+    s = pd.to_numeric(s, errors="coerce").dropna()
+    if s.empty:
+        return s
+    s.index = pd.to_datetime(s.index); s = s.sort_index()
+    out, prev, prevy = [], None, None
+    for dt, v in s.items():
+        q = (dt.month - 1) // 3 + 1
+        out.append(v if (q == 1 or prev is None or dt.year != prevy) else v - prev)
+        prev, prevy = v, dt.year
+    return pd.Series(out, index=s.index)
+
 def find_capex(cf):
     """穩健抓資本支出:先試精確名,再模糊比對(含 Propert + Plant/Equipment),
     取現金流出最大(總和最負)那條,避免漏抓或誤抓處分利益。"""
@@ -146,7 +160,10 @@ def gate_cash(raw):
     ocf = pick(cf, "CashFlowsFromOperatingActivities",
                    "NetCashFlowsFromOperatingActivities", "CashProvidedByOperatingActivities")
     cap = find_capex(cf)
-    ni4, ocf4, cap4 = ni.dropna().tail(4).sum(), ocf.dropna().tail(4).sum(), cap.dropna().tail(4).sum()
+    # 現金流量表是累計值 → 先還原單季再加總;損益表已是單季,不動
+    ni4  = ni.dropna().tail(4).sum()
+    ocf4 = to_single_q(ocf).tail(4).sum()
+    cap4 = to_single_q(cap).tail(4).sum()
     cashq = round(ocf4 / ni4, 2) if ni4 else None
     fcf4  = round((ocf4 + cap4) / 1e8, 1)
     audit = {"近四季OCF(億)": round(ocf4/1e8,1), "近四季淨利(億)": round(ni4/1e8,1),

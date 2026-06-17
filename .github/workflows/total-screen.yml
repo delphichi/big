@@ -1,16 +1,13 @@
 name: 台股五維總篩選定時執行
 
-# ── 觸發條件 ───────────────────────────────
 on:
-  workflow_dispatch:          # Actions 頁面可手動執行
+  workflow_dispatch:
   schedule:
-    # GitHub cron 用 UTC。06:00 UTC = 台北 14:00
-    # 每月 11 號跑:月營收約每月 10 號前公布,11 號抓可納入最新一個月
-    # (基本面四關以月營收/財報為準,按月跑即可)
+    # 06:00 UTC = 台北 14:00;每月 11 號(納入最新月營收)
     - cron: "0 6 11 * *"
 
 permissions:
-  contents: write             # 若要 commit 回 repo 留存歷史
+  contents: write
 
 jobs:
   total-screen:
@@ -19,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4          # 最新可用 v6;v4 穩定不棄用
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -34,30 +31,26 @@ jobs:
 
       - name: Run total screener
         env:
-          # repo → Settings → Secrets and variables → Actions 新增 FINMIND_TOKEN
-          # 此腳本已自環境變數讀取,毋須改 code。
-          # 本流程資料量最大,務必設 token(600/hr),否則極易撞限流
+          # repo → Settings → Secrets → Actions 新增 FINMIND_TOKEN;資料量大務必設
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: python total_screener.py
 
-      # ── 產物保存 1:存成 artifact(一定執行)──────────
+      # ★ 路徑改成 data/(腳本現在輸出到 data/);upload-artifact 升 v6(Node24 原生)
       - name: Upload Excel as artifact
-        uses: actions/upload-artifact@v4   # 最新可用 v7;v4 穩定不棄用
+        uses: actions/upload-artifact@v6
         with:
           name: taiwan-total-screen
-          path: 台股五維總篩選.xlsx
+          path: data/台股五維總篩選.xlsx
           if-no-files-found: error
           retention-days: 90
 
-      # ── 產物保存 2(可選):commit 回 repo 的 data-total/ 留歷史 ──
       - name: Commit output to repo
         run: |
-          mkdir -p data-total
           STAMP=$(date -u +%Y%m%d)
-          cp 台股五維總篩選.xlsx "data-total/${STAMP}_台股五維總篩選.xlsx"
+          cp data/台股五維總篩選.xlsx "data/${STAMP}_台股五維總篩選.xlsx"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data-total/
+          git add data/
           if git diff --staged --quiet; then
             echo "沒有新檔案,略過 commit"
           else

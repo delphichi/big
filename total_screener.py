@@ -34,10 +34,15 @@ START_FUND = "2019-01-01"     # 財報/月營收/PER 歷史(算百分位)
 START_PRICE = "2023-06-01"    # 每日股價(算斜率/52週高)
 BENCHMARK = "0050"
 TOKEN = os.environ.get("FINMIND_TOKEN", "")
-OUTPUT = "台股五維總篩選.xlsx"
+OUTPUT = "data/台股五維總篩選.xlsx"      # 直接輸出到 data/ 資料夾
 
 RULES = dict(grow_months=10, grow_window=12, cashq_min=0.8,
-             val_pct_max=50, qual_pct_min=50, resonance_min=70)
+             val_pct_max=50, qual_pct_min=50, resonance_min=70,
+             # 9 類分類用門檻
+             val_pct_extreme=85,    # PE 歷史百分位 ≥ 此值 = 估值極高(透支)
+             reson_cold=50,         # 共振 < 此值 = 資金冷
+             low_growth_months=6,   # 近12月正成長 ≤ 此值 = 成長弱(收租型)
+             yield_min=4.0)         # 殖利率 ≥ 此值(%) = 高息(收租型)
 D_YEAR, D_13W, D_26W = 252, 65, 130
 
 
@@ -240,12 +245,15 @@ def assess(sid, raw, bench):
     cashq, fcf, cash_audit = gate_cash(raw)
     r["含金量"], r["近四季FCF"] = cashq, fcf
     g2 = cashq is not None and cashq >= RULES["cashq_min"] and fcf is not None and fcf > 0
-    per = raw["per"]; pe = pb = pe_p = pb_p = None
+    per = raw["per"]; pe = pb = pe_p = pb_p = divy = None
     if per is not None and not per.empty:
         per = per.sort_values("date"); pe = per["PER"].iloc[-1]; pb = per["PBR"].iloc[-1]
         pe_p, pb_p = pctile(per["PER"], pe), pctile(per["PBR"], pb)
+        if "dividend_yield" in per.columns:
+            divy = per["dividend_yield"].iloc[-1]
     r["PE"], r["PE百分位"] = (round(pe,1) if pe else None), pe_p
     r["PB百分位"] = pb_p
+    r["殖利率%"] = round(divy,2) if divy is not None and not pd.isna(divy) else None
     g3 = pe_p is not None and pb_p is not None and pe_p <= RULES["val_pct_max"] and pb_p <= RULES["val_pct_max"]
     q = roe_roic_series(raw); roe = roic = roe_p = roic_p = None
     if not q.empty:
@@ -272,12 +280,41 @@ def assess(sid, raw, bench):
     r["卡在"] = "／".join(k for k, v in gates.items() if not v) or "全過"
     score = round(fund/4*50 + (reson/100*50 if reson is not None else 0))
     r["總評分"] = score
-    # 分類
-    if fund >= 3 and g5:       r["分類"] = "★ 主流(基本面+資金同向)"
-    elif g5 and fund <= 1:     r["分類"] = "⚠ 純資金(投機/慎防假突破)"
-    elif fund >= 3 and not g5: r["分類"] = "◎ 潛伏(好公司資金未到)"
-    elif fund >= 2 and g5:     r["分類"] = "○ 偏多"
-    else:                      r["分類"] = "— 不符"
+
+    # ---- 9 類分類(依優先序,先中先定) ----
+    burn_now   = (cashq is not None and cashq < RULES["cashq_min"]) and (fcf is not None and fcf <= 0)
+    cheap      = g3
+    val_extreme = (pe_p is not None and pe_p >= RULES["val_pct_extreme"])
+    hot        = g5
+    cold       = (reson is not None and reson < RULES["reson_cold"])
+    growing    = g1
+    low_growth = (pos is not None and pos <= RULES["low_growth_months"])
+    high_yield = (divy is not None and not pd.isna(divy) and divy >= RULES["yield_min"])
+    qual_ok    = g4
+
+    if growing and burn_now:
+        cat = "🔥 燒錢成長(成長吞現金)"
+    elif hot and fund <= 1:
+        cat = "⚠ 純資金(投機/慎防假突破)"
+    elif cheap and not qual_ok and not growing:
+        cat = "🪤 價值陷阱(便宜有原因)"
+    elif fund >= 2 and val_extreme and hot:
+        cat = "🏔 估值透支(好公司但太貴)"
+    elif fund >= 3 and hot:
+        cat = "★ 主流(基本面+資金同向)"
+    elif fund >= 3 and cheap and not hot:
+        cat = "◎ 潛伏(好公司便宜·資金未到)"
+    elif growing and cheap and not qual_ok:
+        cat = "🔄 循環反轉初期(便宜·營收回溫·獲利未復)"
+    elif qual_ok and g2 and cheap and not hot:
+        cat = "💎 價值低估(績優便宜·被冷落)"
+    elif low_growth and g2 and high_yield and not hot:
+        cat = "🐢 穩定收租(牛皮績優·股息)"
+    elif fund >= 2:
+        cat = "○ 偏多"
+    else:
+        cat = "— 不符"
+    r["分類"] = cat
 
     # 計算稽核(中間值,供逐項核對)
     def last_date(df, col="date"):
@@ -320,9 +357,11 @@ def main():
         df = df.sort_values("總評分", ascending=False)
         cols = ["代號", "總評分", "分類", "五關", "卡在", "基本面", "共振分數",
                 "營收正成長", "含金量", "近四季FCF", "PE", "PE百分位", "PB百分位",
-                "ROE%", "ROE百分位", "ROIC%", "ROIC百分位", "相對報酬%", "週斜率%", "RS創高", "亮燈"]
+                "ROE%", "ROE百分位", "ROIC%", "ROIC百分位", "殖利率%",
+                "相對報酬%", "週斜率%", "RS創高", "亮燈"]
         df = df[[c for c in cols if c in df.columns]]
 
+    os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)   # 確保 data/ 存在
     with pd.ExcelWriter(OUTPUT, engine="openpyxl") as xw:
         df.to_excel(xw, sheet_name="五維總篩選", index=False)
         # 計算稽核:中間值,可自行除一遍對

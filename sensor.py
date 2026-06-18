@@ -119,7 +119,9 @@ def hard_filter(tk, north):
 def base_of(diff, types_present):
     """單一差異的基礎分。敘事搭配②③時提升;敘事單獨保持低分(且鐵律3會擋掉輸出)。"""
     t = diff["type"]
-    base = diff.get("base_ds", DIFF_TYPES[t]["default"])
+    base = diff.get("base_ds")            # 缺鍵或填 null 都回退到該差異類型的預設權重
+    if base is None:
+        base = DIFF_TYPES[t]["default"]
     if t == NARRATIVE:
         combined = ("基本面差異" in types_present) or ("矛盾訊號" in types_present)
         if combined:
@@ -399,7 +401,7 @@ def _urgency(r):
     return "低"
 
 
-def render_report(res):
+def render_report(res, full=False):
     L = []
     L.append(f"# SLCA 投資感測器 v2 · 本週種子")
     L.append(f"> 掃描日期:{res.get('as_of') or _dt.date.today().isoformat()}　"
@@ -449,7 +451,219 @@ def render_report(res):
         L.append("並依各顆「信心分數」決定深化力度;A級才值得全套深化分析。")
     else:
         L.append("本週無種子可交棒。")
+
+    if full and res["seeds"]:
+        verify = res.get("verify")
+        L.append("")
+        L.append(render_handoff(res))
+        L.append("")
+        L.append(render_reality_check(res, verify))
+        L.append("")
+        L.append(render_evolution_log(res, verify))
     return "\n".join(L)
+
+
+def render_handoff(res):
+    """步驟:交棒 SLCA v5 —— 每顆種子產生一段可直接貼上的指令(對齊 Prompt『與 SLCA v5 的銜接』)。"""
+    L = ["---", "## 交棒指令(逐顆,直接複製貼入 SLCA v5 對話)"]
+    for i, r in enumerate(res["seeds"], 1):
+        tk = r["tk"]
+        L.append("")
+        L.append(f"### 種子 #{i}　{r['label']}　[{r['grade']}級]")
+        L.append("```")
+        L.append(render_seed(i, r))
+        L.append("")
+        L.append("以這顆種子為起點執行 SLCA 認知循環。")
+        L.append(f"建議方向:{tk.get('suggest_direction') or '深化'}")
+        L.append(f"信心分數 {r['conf']},請依此決定深化力度。")
+        L.append("請特別針對殺死條件與共識脆弱前提執行紅隊攻擊。")
+        L.append("```")
+    return "\n".join(L)
+
+
+def render_reality_check(res, verify=None):
+    """步驟:現實驗證 —— Q3 可觀察事件 + 殺死條件 + 檢核截止;
+    若有 verify(total_screener 抓回的客觀數據),附上現況快照與自動判讀。"""
+    verify = verify or {}
+    as_of = res.get("as_of") or _dt.date.today().isoformat()
+    try:
+        base = _dt.date.fromisoformat(as_of)
+    except Exception:
+        base = _dt.date.today()
+    L = ["---", "## 現實驗證追蹤表(Reality Loop · Q3 是否兌現)"]
+    for i, r in enumerate(res["seeds"], 1):
+        tk = r["tk"]
+        months = int(tk.get("observe_months") or 12)
+        due = base + _dt.timedelta(days=months * 30)   # 近似:每月30天,免依賴外部套件
+        q3 = (tk.get("popper", {}) or {}).get("q3_observable") or "—"
+        kill = tk.get("kill_condition") or "—"
+        sid = tk.get("id")
+        L.append("")
+        L.append(f"### #{i} {r['label']}　差異:{'＋'.join(r['calc']['types'])}")
+        L.append(f"- **可觀察事件(Q3)**:{q3}")
+        L.append(f"- **殺死條件**:{kill}")
+        L.append(f"- **檢核截止**:{due.isoformat()}(觀察期 {months} 個月)")
+        snap = verify.get(sid)
+        if snap is None:
+            L.append("- **客觀現況**:(未取得 FinMind 數據;設定 FINMIND_TOKEN 後以 --full 重跑即自動填入)")
+            L.append("- **狀態**:☐ 待驗證")
+        else:
+            L.append("- **客觀現況(total_screener 抓回)**:")
+            for line in _snap_lines(snap):
+                L.append(f"    - {line}")
+            L.append(f"- **自動判讀**:{_verdict(r['calc']['types'], snap)}")
+            L.append("- **狀態**:☐ 待人工確認(數據已附,Q3 文字事件仍需人眼判定)")
+    L.append("")
+    L.append("> 驗證後:兌現 → 強化該差異類型 DS 權重;殺死條件成立 → 記錄並分析哪步出錯;")
+    L.append("> 假陽性反覆出現 → 考慮新增死亡模式。結果回填下方演化記錄,並回寫感測器。")
+    return "\n".join(L)
+
+
+def render_evolution_log(res, verify=None):
+    """步驟:演化記錄欄 —— 本次掃描的紀錄列;若有 verify,把客觀數據快照寫進『掃描當下數據』。"""
+    verify = verify or {}
+    as_of = res.get("as_of") or _dt.date.today().isoformat()
+    n = len(res["seeds"])
+    types = "、".join(sorted({"＋".join(r["calc"]["types"]) for r in res["seeds"]})) or "—"
+    confs = "／".join(str(r["conf"]) for r in res["seeds"]) or "—"
+    dss = "／".join(str(r["ds"]) for r in res["seeds"]) or "—"
+    L = ["---", "## 演化記錄欄(本次掃描;結果欄待現實驗證後回填)",
+         "", "```",
+         "[日期] | 輸出N顆 | 差異類型 | DS | 信心分數 | 後來結果 | 學到什麼 | 死亡模式庫變動",
+         f"{as_of} | {n}顆 | {types} | {dss} | {confs} | (待驗證) | (待回填) | (無)",
+         "```"]
+    if verify:
+        L.append("")
+        L.append("### 掃描當下客觀數據快照(total_screener,供日後比對差異是否收斂)")
+        L.append("")
+        L.append("| 種子 | 五維分類 | 總評分 | 共振 | ROE百分位 | 近四季FCF(億) | 毛利率趨勢 | 連兩季淨利改善 | 股價位置 |")
+        L.append("|---|---|---|---|---|---|---|---|---|")
+        for i, r in enumerate(res["seeds"], 1):
+            s = verify.get(r["tk"].get("id")) or {}
+            L.append("| #{} {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+                i, r["label"], s.get("分類", "—"), s.get("總評分", "—"),
+                s.get("共振分數", "—"), s.get("ROE百分位", "—"), s.get("近四季FCF", "—"),
+                s.get("毛利率趨勢", "—"), ("是" if s.get("連兩季淨利改善") else
+                                        ("否" if s.get("連兩季淨利改善") is not None else "—")),
+                s.get("股價位置", "—")))
+    L.append("")
+    L.append("> 將此列貼到專案的演化記錄;待 Q3 事件或殺死條件揭曉後回填『後來結果/學到什麼』,")
+    L.append("> 並依學習更新 DS 權重與死亡模式庫(Reality Loop 的回寫)。")
+    return "\n".join(L)
+
+
+# ════════════════════════════════════════════
+# 現實驗證:用 total_screener 抓 FinMind 數據,為每顆種子算客觀指標
+#   沒裝 FinMind / 沒 token 時回傳空 dict,render 端自動退回「待驗證」。
+# ════════════════════════════════════════════
+def verify_seeds(seeds):
+    if not seeds:
+        return {}
+    try:
+        import pandas as pd
+        from total_screener import (make_loader, fetch_all, fetch_price, assess,
+                                     pivot, pick, BENCHMARK, START_PRICE)
+    except Exception as e:
+        print(f"[現實驗證 跳過] 無法載入 FinMind / total_screener:{e}")
+        return {}
+    if not os.environ.get("FINMIND_TOKEN"):
+        print("[現實驗證 跳過] 未設定 FINMIND_TOKEN(資料量大,務必設)")
+        return {}
+
+    dl = make_loader()
+    bench = fetch_price(dl, BENCHMARK, START_PRICE)
+    bench = bench["close"] if not bench.empty else pd.Series(dtype=float)
+    out = {}
+    for r in seeds:
+        sid = r["tk"].get("id")
+        if not sid:
+            continue
+        try:
+            raw = fetch_all(dl, sid)
+            rr, _, _ = assess(sid, raw, bench)          # 沿用五維篩選的所有指標
+            snap = {k: rr.get(k) for k in
+                    ("分類", "總評分", "共振分數", "五關", "PE", "PE百分位",
+                     "ROE%", "ROE百分位", "近四季FCF", "含金量",
+                     "相對報酬%", "週斜率%", "RS創高", "亮燈")}
+            snap.update(_margin_ni_price(raw, pivot, pick))   # 補:毛利率趨勢/連兩季淨利/股價位置
+            out[sid] = snap
+            print(f"[現實驗證] {sid} 已抓取並分析")
+        except Exception as e:
+            print(f"[現實驗證] {sid} 失敗:{e}")
+    return out
+
+
+def _margin_ni_price(raw, pivot, pick):
+    """補算 total_screener 沒直接給的三項:近四季毛利率趨勢、連兩季淨利是否改善、股價在52週區間位置。"""
+    import pandas as pd
+    snap = {"毛利率近4季": None, "毛利率趨勢": None, "連兩季淨利改善": None, "股價位置": None}
+    inc = pivot(raw.get("inc"))
+    if not inc.empty:
+        rev = pd.to_numeric(pick(inc, "Revenue", "OperatingRevenue", "NetSales"), errors="coerce")
+        gp = pd.to_numeric(pick(inc, "GrossProfit", "GrossProfitLoss"), errors="coerce")
+        gm = (gp / rev * 100).dropna()
+        if len(gm) >= 2:
+            last4 = [round(x, 1) for x in gm.tail(4).tolist()]
+            snap["毛利率近4季"] = last4
+            snap["毛利率趨勢"] = ("上升" if gm.iloc[-1] > gm.iloc[-2] else
+                               "下滑" if gm.iloc[-1] < gm.iloc[-2] else "持平")
+        ni = pd.to_numeric(pick(inc, "IncomeAfterTaxes", "IncomeAfterTax", "ProfitAfterTax"),
+                           errors="coerce").dropna()
+        if len(ni) >= 3:
+            snap["連兩季淨利改善"] = bool(ni.iloc[-1] > ni.iloc[-2] and ni.iloc[-2] > ni.iloc[-3])
+    price = raw.get("price")
+    if price is not None and not price.empty and len(price) >= 252:
+        s = price["close"]; last = s.iloc[-1]
+        lo, hi = s.tail(252).min(), s.tail(252).max()
+        if hi > lo:
+            pos = (last - lo) / (hi - lo)
+            snap["股價位置"] = ("接近52週低" if pos < 0.2 else
+                             "接近52週高" if pos > 0.8 else f"區間{round(pos*100)}%位置")
+    return snap
+
+
+def _snap_lines(s):
+    """把快照整理成可讀的條列(現實驗證用)。"""
+    L = []
+    L.append(f"五維分類:{s.get('分類','—')}　總評分 {s.get('總評分','—')}　共振 {s.get('共振分數','—')}　五關 {s.get('五關','—')}")
+    L.append(f"估值/品質:PE {s.get('PE','—')}(歷史百分位 {s.get('PE百分位','—')})、"
+             f"ROE {s.get('ROE%','—')}%(歷史百分位 {s.get('ROE百分位','—')})、"
+             f"近四季FCF {s.get('近四季FCF','—')} 億、含金量 {s.get('含金量','—')}")
+    L.append(f"毛利率近4季:{s.get('毛利率近4季','—')}　趨勢:{s.get('毛利率趨勢','—')}　"
+             f"連兩季淨利改善:{'是' if s.get('連兩季淨利改善') else ('否' if s.get('連兩季淨利改善') is not None else '—')}")
+    L.append(f"動能:股價位置 {s.get('股價位置','—')}、近半年相對報酬 {s.get('相對報酬%','—')}%、"
+             f"週斜率 {s.get('週斜率%','—')}%/週、RS創高 {s.get('RS創高') or '—'}")
+    return L
+
+
+def _verdict(types, s):
+    """依種子的差異類型 + 客觀快照,給輕量啟發式判讀(仍需人眼確認)。"""
+    types = set(types); notes = []
+    roe_p = s.get("ROE百分位"); pos = s.get("股價位置") or ""; gm_t = s.get("毛利率趨勢")
+    ni2 = s.get("連兩季淨利改善"); rel = s.get("相對報酬%")
+    cashq = s.get("含金量"); fcf = s.get("近四季FCF")
+    if "矛盾訊號" in types:
+        # 品質/現金背離:含金量<0.8 或 FCF<0 → 品質可能是帳面幻覺
+        if (cashq is not None and cashq < 0.8) or (fcf is not None and fcf < 0):
+            notes.append(f"含金量{cashq}、近四季FCF{fcf}億 仍偏弱 → 品質/現金背離未解,留意品質幻覺/燒錢")
+        # 落後型矛盾:看相對報酬而非絕對股價位置
+        elif rel is not None and rel < 0 and roe_p is not None and roe_p >= 70:
+            notes.append(f"ROE百分位{roe_p}(品質高)但近半年相對報酬{rel}%(仍落後大盤) → 矛盾未收斂")
+        elif rel is not None and rel > 0:
+            notes.append(f"相對報酬已轉正({rel}%) → 矛盾收斂中,留意是否已被定價")
+        elif roe_p is not None and roe_p >= 70 and "低" in pos:
+            notes.append(f"ROE仍居高位(百分位{roe_p})而股價仍偏低 → 品質/定價背離尚在")
+    if "基本面差異" in types and gm_t:
+        notes.append(f"毛利率趨勢{gm_t}" + ("(支持基本面假說)" if gm_t == "上升"
+                     else "(與基本面假說相左)" if gm_t == "下滑" else ""))
+    if "價格差異" in types and pos:
+        notes.append(f"股價{pos}")
+    if ni2 is not None:
+        notes.append("連兩季淨利改善" + ("成立(死亡模式003『單季幻覺』風險降低)" if ni2
+                     else "不成立(僅單季,留意業績轉機幻覺)"))
+    if types & {"時間差異", "敘事差異", "反共識裂縫"}:
+        notes.append("事件/敘事面(時程、共識前提等)非財報可量化,需人工追蹤")
+    return "；".join(notes) if notes else "客觀數據已附,請人工對照 Q3 與殺死條件判定"
 
 
 # ════════════════════════════════════════════
@@ -576,11 +790,14 @@ def main():
     ap.add_argument("--out", default="data/SLCA_種子.md", help="種子報告輸出路徑(.md)")
     ap.add_argument("--auto", action="store_true", help="額外用 FinMind 自動偵測①②③(需 FINMIND_TOKEN)")
     ap.add_argument("--template", action="store_true", help="印出空白輸入模板 JSON 後結束")
+    ap.add_argument("--full", action="store_true",
+                    help="種子後附完整 Reality Loop:交棒指令 + 現實驗證追蹤表 + 演化記錄列")
     args = ap.parse_args()
 
     if args.template or not args.input:
-        if not args.input:
-            print("（未提供 --input,印出空白輸入模板;請填好後以 --input 執行)\n")
+        if not args.input:   # 提示走 stderr,避免污染被重導向的 JSON(stdout)
+            import sys
+            print("（未提供 --input,印出空白輸入模板;請填好後以 --input 執行)", file=sys.stderr)
         print(json.dumps(build_input_template(), ensure_ascii=False, indent=2))
         return
 
@@ -589,7 +806,9 @@ def main():
         data = auto_detect(data)
 
     res = run_sensor(data)
-    report = render_report(res)
+    if args.full:   # 現實驗證:用 total_screener 抓 FinMind 數據(無 token 自動跳過)
+        res["verify"] = verify_seeds(res["seeds"])
+    report = render_report(res, full=args.full)
 
     if args.out:
         os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

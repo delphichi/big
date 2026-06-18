@@ -2,6 +2,19 @@ name: 台股五維總篩選定時執行
 
 on:
   workflow_dispatch:
+    inputs:
+      build_universe:
+        description: "先用 build_universe 依產業別重建能力圈股池(否則用已 commit 的 universe.txt 或預設6檔)"
+        type: boolean
+        default: false
+      keywords:
+        description: "能力圈產業別關鍵字(空白分隔)"
+        default: "半導體 通信網路 電子零組件 電腦及週邊 金融 證券 銀行"
+        required: false
+      gen_seeds:
+        description: "篩完後接著用 screener_to_seeds 產出感測器種子"
+        type: boolean
+        default: true
   schedule:
     # 06:00 UTC = 台北 14:00;每月 11 號(納入最新月營收)
     - cron: "0 6 11 * *"
@@ -12,7 +25,7 @@ permissions:
 jobs:
   total-screen:
     runs-on: ubuntu-latest
-    timeout-minutes: 30        # 最重:每檔拉5年財報+5年每日PE/PB+2年股價+大盤
+    timeout-minutes: 350       # 股池可達數百檔(每檔拉5年財報);留足空間,仍在 Actions 6 小時上限內
 
     steps:
       - name: Checkout repo
@@ -29,19 +42,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install FinMind pandas numpy openpyxl requests
 
+      # 只有手動觸發並勾選時才重建股池;排程沿用已 commit 的 universe.txt(沒有則 total_screener 退回預設6檔)
+      - name: Build universe (能力圈股池)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_universe }}
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python build_universe.py --keywords ${{ inputs.keywords }} --out universe.txt
+
       - name: Run total screener
         env:
           # repo → Settings → Secrets → Actions 新增 FINMIND_TOKEN;資料量大務必設
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-        run: python total_screener.py
+        run: python total_screener.py      # 自動讀 universe.txt(存在的話)
+
+      # 接著橋接成感測器種子(預設開;只用標準庫+openpyxl)
+      - name: Generate sensor seeds
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.gen_seeds }}
+        run: |
+          STAMP=$(date -u +%Y%m%d)
+          python screener_to_seeds.py data/台股五維總篩選.xlsx \
+            --as-of "$(date -u +%Y-%m-%d)" --out "data/SLCA_種子_${STAMP}_實測.md"
 
       # ★ 路徑改成 data/(腳本現在輸出到 data/);upload-artifact 升 v6(Node24 原生)
-      - name: Upload Excel as artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
           name: taiwan-total-screen
-          path: data/台股五維總篩選.xlsx
-          if-no-files-found: error
+          path: |
+            data/台股五維總篩選.xlsx
+            data/SLCA_種子_*_實測.md
+          if-no-files-found: warn
           retention-days: 90
 
       - name: Commit output to repo
@@ -51,9 +81,10 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/
+          [ -f universe.txt ] && git add universe.txt || true
           if git diff --staged --quiet; then
             echo "沒有新檔案,略過 commit"
           else
-            git commit -m "data: 自動更新台股五維總篩選 ${STAMP}"
+            git commit -m "data: 自動更新台股五維總篩選 + 感測器種子 ${STAMP}"
             git push
           fi

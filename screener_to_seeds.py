@@ -36,6 +36,10 @@ DEATH_005 = {"id": "005", "name": "純資金假突破", "penalty": 35,
              "trigger": "基本面弱(≤1/4) + 共振強 + 價格創高",
              "history": "純資金推動、基本面未跟上的標的多數回落",
              "fail_rate": "—", "handling": "基本面未跟上前,資金面差異不計入種子"}
+DEATH_006 = {"id": "006", "name": "品質幻覺(高ROE低含金量)", "penalty": 35,
+             "trigger": "ROE/ROIC歷史百分位高,但含金量<0.8/FCF為負(獲利沒轉成現金)",
+             "history": "銀行/金融與燒錢成長股的 OCF/FCF 關卡本就失真;高ROE未必=真品質",
+             "fail_rate": "—", "handling": "品質類矛盾需含金量≥0.8 才成立;否則扣分降為觀察/忽略"}
 
 
 def _num(v):
@@ -94,27 +98,34 @@ def build(xlsx, as_of):
         elif roe_p is not None and roe_p >= 80:
             diffs.append({"type": "基本面差異", "note": f"ROE百分位{roe_p}(品質居歷史高位)"})
 
-        contra, base = [], 0
-        if pe_p is not None and pe_p <= 40 and roe_p is not None and roe_p >= 80:
+        # ③ 矛盾訊號:品質訊號必須「現金支撐」(含金量≥0.8)才算真品質;否則視為品質幻覺
+        cash_backed = cashq is not None and cashq >= 0.8
+        contra, base, deaths = [], 0, []
+        if pe_p is not None and pe_p <= 40 and roe_p is not None and roe_p >= 80 and cash_backed:
             contra.append(f"ROE百分位{roe_p}(品質高)但PE百分位{pe_p}(估值便宜)——便宜的好公司"); base = max(base, 88)
-        if roe_p is not None and roe_p >= 80 and rel is not None and rel < 0:
-            contra.append(f"ROE百分位{roe_p}(品質高)但近半年相對報酬{rel}%(股價落後大盤)"); base = max(base, 78)
+        # 中度落後才算錯殺;崩跌(<-30%)排除,那通常是市場知道了什麼
+        if roe_p is not None and roe_p >= 80 and rel is not None and -30 <= rel < 0 and cash_backed:
+            contra.append(f"ROE百分位{roe_p}(品質高)但近半年相對報酬{rel}%(中度落後大盤)"); base = max(base, 78)
+        # 品質百分位高但燒錢:品質幻覺 → 命中死亡模式006,扣分降為觀察/忽略,不該成A級
         if ((roe_p and roe_p >= 80) or (roic_p and roic_p >= 80)) and cashq is not None and cashq < 0.8:
-            contra.append(f"品質百分位高,但含金量{cashq}<0.8、FCF{fcf}億(賺帳面、現金未跟上)"); base = max(base, 72)
+            contra.append(f"品質百分位高,但含金量{cashq}<0.8、FCF{fcf}億(品質幻覺/燒錢,疑似陷阱)")
+            base = max(base, 55); deaths.append("006")
         if contra:
             diffs.append({"type": "矛盾訊號", "base_ds": base, "note": "；".join(contra)})
 
-        deaths = ["005"] if (cat.startswith("⚠ 純資金") and not (roe_p and roe_p >= 80)) else []
+        # 死亡模式:005 純資金假突破(基本面弱+資金強);006 由上方品質幻覺加入
+        if cat.startswith("⚠ 純資金") and not (roe_p and roe_p >= 80):
+            deaths.append("005")
 
         cstr = "".join(contra)
         if "便宜的好公司" in cstr:
             q3 = "未來兩季:估值修復(PE歷史百分位回升)且股價由落後轉為跑贏大盤"
             kill = "ROE/ROIC歷史百分位跌破中位數,或便宜持續無人重估達兩季以上"
-        elif "股價落後" in cstr:
+        elif "中度落後" in cstr:
             q3 = "未來兩季:近半年相對報酬由負轉正,且ROE歷史百分位維持≥80"
             kill = "ROE百分位顯著下滑,或相對報酬連兩季續惡化"
-        elif "現金未跟上" in cstr:
-            q3 = "未來兩季:獲利含金量回升至≥0.8且自由現金流轉正"
+        elif "品質幻覺" in cstr:
+            q3 = "未來兩季:獲利含金量回升至≥0.8且自由現金流轉正(證明非燒錢)"
             kill = "含金量連兩季<0.8且FCF持續為負(確認為品質幻覺/燒錢)"
         elif diffs:
             q3 = "未來兩季:營收YoY維持正成長且ROE歷史百分位不下滑"
@@ -145,7 +156,7 @@ def build(xlsx, as_of):
                        "股價位置": "接近52週高" if "價格創52週高" in lit else None}
 
     data = {"as_of": as_of, "north_star": NORTH_STAR, "market_volatility_high": False,
-            "death_patterns_extra": [DEATH_005], "tickers": tickers}
+            "death_patterns_extra": [DEATH_005, DEATH_006], "tickers": tickers}
     return data, verify
 
 

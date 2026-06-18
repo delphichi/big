@@ -31,7 +31,7 @@ import os, time
 import numpy as np
 import pandas as pd
 
-TICKERS = ["2330", "2454", "2379", "2408", "3231", "6274"]  # 台積電 聯發科 瑞昱 南亞科 緯創 台燿
+TICKERS = ["2327", "2303", "2492", "6239", "3037", "3189"]  # 台積電 聯發科 瑞昱 南亞科 緯創 台燿
 
 
 def load_tickers():

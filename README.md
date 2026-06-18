@@ -80,6 +80,40 @@ DEFAULT_STOCKS = [
 
 ---
 
+## 🧭 SLCA 投資感測器 v2（`sensor.py`）
+
+把 `SLCA_______Prompt_v2.md` 的偵測流程程式化：從市場差異產生「種子」，交棒給 SLCA v5 分析。
+**感測器只偵測、不分析、不建議買賣**（眼睛不是大腦）。
+
+### 它做什麼
+
+完整實作 Prompt 的七步流程：六種差異掃描 → **差異強度評分 DS**（基礎+共振+歷史−死亡模式）
+→ **波普爾三問**假陽性過濾 → 機會成本感測 → **信心分數** → **注意力預算**（A級DS>85最多1顆、
+B級DS70–85最多2顆、合計≤3）→ 輸出標準種子格式。內建**死亡模式庫**（敘事泡沫／假底部／
+業績轉機幻覺／政策題材），命中即扣分。
+
+### 怎麼跑
+
+```bash
+# 1) 產生空白輸入模板
+python3 sensor.py --template > sensor_input.json
+
+# 2) 填好當週原始資料（敘事／反共識／法人／波普爾三問答案…），再執行
+python3 sensor.py --input sensor_input.json --out data/SLCA_種子.md
+
+# 直接看範例（已附 sensor_input.example.json）
+python3 sensor.py --input sensor_input.example.json --out data/SLCA_種子_範例.md
+
+# 選配：額外用 FinMind 自動偵測 ①價格／②基本面／③矛盾（需 FINMIND_TOKEN）
+python3 sensor.py --input sensor_input.json --auto
+```
+
+> **引擎只用 Python 標準庫**，沒裝 FinMind／pandas 也能跑 —— 量化差異（①②③）可選擇用
+> `--auto` 從 FinMind 自動補入，質性差異（④敘事／⑤反共識／⑥時間）與三問答案則由輸入檔提供。
+> 也可由 `Actions → SLCA 投資感測器 v2（手動）` 手動觸發。
+
+---
+
 ## ⚠️ 注意事項
 
 - 資料來源：[聚財網](https://stock.wearn.com) 集保股權分散表

@@ -1,0 +1,136 @@
+{
+  "as_of": "2026-06-18",
+  "north_star": {
+    "philosophy": "用合理價格買進品質持續創高、但被市場錯誤定價的公司,持有至差異收斂",
+    "circle": ["半導體", "網通", "被動元件"],
+    "market_cap_min_yi": 100,
+    "timeframe": "12–24個月",
+    "history_success": {}
+  },
+  "market_volatility_high": false,
+  "death_patterns_extra": [],
+
+  "tickers": [
+    {
+      "id": "2454", "name": "聯發科",
+      "market_cap_yi": 19000, "in_circle": true, "liquidity_ok": true,
+      "differences": [
+        { "type": "反共識裂縫", "base_ds": 85, "note": "市場共識『手機SoC見頂』的最脆弱前提(旗艦滲透率)已開始鬆動", "institutional_support": true },
+        { "type": "矛盾訊號", "note": "出貨量下修敘事中,旗艦ASP與毛利率卻同步上行" }
+      ],
+      "consensus": "手機SoC市場見頂,聯發科成長動能用盡",
+      "fragile_premise": "若旗艦天璣滲透率續升,『見頂』前提立刻瓦解",
+      "death_patterns": [],
+      "has_history_case": true,
+      "kill_condition": "旗艦SoC市佔連兩季下滑且毛利率回落",
+      "kill_hard_to_verify": false,
+      "observe_months": 12,
+      "suggest_direction": "反共識",
+      "popper": {
+        "q1_false_positive_count": 1,
+        "q2_mundane": "只是手機旺季前的庫存回補",
+        "q2_fully_explains": false,
+        "q3_observable": "Q3旗艦SoC出貨佔比與毛利率同步公布上行"
+      }
+    },
+
+    {
+      "id": "2379", "name": "瑞昱",
+      "market_cap_yi": 2400, "in_circle": true, "liquidity_ok": true,
+      "differences": [
+        { "type": "矛盾訊號", "base_ds": 80, "note": "ROE創新高,股價卻接近52週低,品質與定價背離", "institutional_support": true },
+        { "type": "基本面差異", "note": "近四季ROE居自身歷史92百分位,毛利率逆同業上行" }
+      ],
+      "consensus": "網通晶片進入殺價週期,毛利率將見頂回落",
+      "fragile_premise": "若WiFi7換機需求啟動,殺價假設崩潰",
+      "death_patterns": [],
+      "has_history_case": true,
+      "kill_condition": "連續兩季毛利率環比下滑且法人由買轉賣",
+      "kill_hard_to_verify": false,
+      "observe_months": 12,
+      "suggest_direction": "反共識",
+      "popper": {
+        "q1_false_positive_count": 1,
+        "q2_mundane": "大盤回檔帶下來的普跌",
+        "q2_fully_explains": false,
+        "q3_observable": "Q3法說毛利率守穩或回升、WiFi7出貨佔比上升"
+      }
+    },
+
+    {
+      "id": "3231", "name": "緯創",
+      "market_cap_yi": 3000, "in_circle": true, "liquidity_ok": true,
+      "differences": [
+        { "type": "時間差異", "base_ds": 70, "note": "新AI機種供應鏈已重組,訂單能見度尚未反映在共識EPS", "institutional_support": true },
+        { "type": "基本面差異", "note": "AI伺服器營收佔比連兩季提升,毛利結構改善" }
+      ],
+      "consensus": "AI代工只是低毛利組裝財,難享估值溢價",
+      "fragile_premise": "若AI機種毛利結構優於傳統伺服器,組裝財論述失效",
+      "death_patterns": [],
+      "has_history_case": false,
+      "kill_condition": "AI伺服器營收佔比連兩季未提升,或毛利率未改善",
+      "kill_hard_to_verify": false,
+      "observe_months": 9,
+      "suggest_direction": "深化",
+      "popper": {
+        "q1_false_positive_count": 0,
+        "q2_mundane": "AI題材輪動帶量",
+        "q2_fully_explains": false,
+        "q3_observable": "下兩季AI伺服器營收佔比與毛利率同步上行"
+      }
+    },
+
+    {
+      "id": "2408", "name": "南亞科",
+      "market_cap_yi": 1500, "in_circle": true, "liquidity_ok": true,
+      "differences": [
+        { "type": "價格差異", "note": "股價創低但成交量萎縮(無人拋售)", "institutional_support": true },
+        { "type": "基本面差異", "base_ds": 55, "note": "單季由虧轉盈" }
+      ],
+      "consensus": "DRAM週期落底,單季轉盈代表谷底已過",
+      "fragile_premise": "若供給仍過剩,單季轉盈只是一次性",
+      "death_patterns": [],
+      "kill_condition": "次季再度轉虧或現貨價續跌",
+      "observe_months": 12,
+      "suggest_direction": "深化",
+      "popper": { "q1_false_positive_count": 0, "q2_mundane": "底部例行反彈", "q2_fully_explains": false, "q3_observable": "連兩季獲利改善且現貨價回升" }
+    },
+
+    {
+      "id": "5483", "name": "中美晶",
+      "market_cap_yi": 800, "in_circle": true, "liquidity_ok": true,
+      "differences": [
+        { "type": "矛盾訊號", "base_ds": 80, "note": "法人買超+股價創低,但矽晶圓產業結構仍在惡化" }
+      ],
+      "consensus": "矽晶圓落底,法人提前布局",
+      "fragile_premise": "若產能過剩未解,法人買超只是搶反彈",
+      "death_patterns": ["002"],
+      "kill_condition": "矽晶圓報價續跌",
+      "observe_months": 12,
+      "suggest_direction": "深化",
+      "popper": { "q1_false_positive_count": 0, "q2_mundane": "搶反彈", "q2_fully_explains": false, "q3_observable": "報價止穩" }
+    },
+
+    {
+      "id": "6531", "name": "愛普*",
+      "market_cap_yi": 600, "in_circle": true, "liquidity_ok": true,
+      "differences": [
+        { "type": "敘事差異", "note": "記憶體缺貨敘事爆紅,被動跟漲" }
+      ],
+      "consensus": "記憶體大缺貨,相關股雞犬升天",
+      "fragile_premise": "缺貨若為渠道補庫存假象,行情即反轉",
+      "death_patterns": [],
+      "kill_condition": "現貨價回落",
+      "observe_months": 6,
+      "suggest_direction": "深化",
+      "popper": { "q1_false_positive_count": 0, "q2_mundane": "題材跟漲", "q2_fully_explains": false, "q3_observable": "" }
+    },
+
+    {
+      "id": "1234", "name": "小型股範例",
+      "market_cap_yi": 40, "in_circle": true, "liquidity_ok": false,
+      "differences": [ { "type": "矛盾訊號", "note": "示範:市值/流動性不足會在硬過濾被剔除" } ],
+      "popper": { "q3_observable": "x" }
+    }
+  ]
+}

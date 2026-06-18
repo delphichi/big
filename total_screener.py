@@ -450,6 +450,18 @@ def main():
                 print(f"  ! {sid} 失敗:{e}")
                 errs += 1
 
+    write_output(rows, audits, freshes, raws, dump_raw=DUMP_RAW)
+    print(f"(本輪成功 {done} 檔)")
+    if remaining:
+        print(f"⚠ 尚有 {len(remaining)} 檔未完成(限流中斷)。"
+              f"稍後(約一小時後額度回補)再執行一次 total_screener.py 即可續跑——"
+              f"已完成的會走當日快取、不再耗用額度。\n  未完成範例:{remaining[:10]}{' …' if len(remaining)>10 else ''}")
+    if errs:
+        print(f"另有 {errs} 檔因其他原因失敗(非限流)。")
+
+
+def write_output(rows, audits, freshes, raws, dump_raw=False):
+    """把評估結果寫成五維總篩選 xlsx(main 與 total_screener_bulk 共用)。"""
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.sort_values("總評分", ascending=False)
@@ -473,20 +485,14 @@ def main():
         if freshes:
             pd.DataFrame(freshes).to_excel(xw, sheet_name="資料時效", index=False)
         # 每檔原始三表 + 月營收(逐列核對來源)
-        if DUMP_RAW:
+        if dump_raw:
             for sid, raw in raws.items():
                 for key, label in [("inc","損益表"),("bal","資產負債"),("cf","現金流"),("rev","月營收")]:
                     d = raw.get(key)
                     if d is not None and not d.empty:
                         d.tail(RAW_TAIL*40 if key!="rev" else 30).to_excel(
                             xw, sheet_name=f"{sid}_{label}"[:31], index=False)
-    print(f"\n已輸出:{OUTPUT}(本輪成功 {done} 檔)\n")
-    if remaining:
-        print(f"⚠ 尚有 {len(remaining)} 檔未完成(限流中斷)。"
-              f"稍後(約一小時後額度回補)再執行一次 total_screener.py 即可續跑——"
-              f"已完成的會走當日快取、不再耗用額度。\n  未完成範例:{remaining[:10]}{' …' if len(remaining)>10 else ''}")
-    if errs:
-        print(f"另有 {errs} 檔因其他原因失敗(非限流)。")
+    print(f"\n已輸出:{OUTPUT}")
     pd.set_option("display.unicode.east_asian_width", True); pd.set_option("display.width", 260)
     show = [c for c in ["代號","總評分","分類","五關","卡在","基本面","共振分數"] if c in df.columns]
     if not df.empty:

@@ -29,7 +29,7 @@
 import os, sys, time, csv
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ---------- 設定 ----------
 TOKEN          = os.environ.get("FINMIND_TOKEN", "")
@@ -105,23 +105,45 @@ def make_loader():
             print("token 登入失敗(改用免費額度):", e)
     return api
 
-def fetch_revenue(api, sid, start):
-    """抓單檔月營收;撞限流自動等待重試。回傳 DataFrame 或 None。"""
-    for attempt in range(MAX_RETRY):
+class RateLimited(Exception):
+    """FinMind 每小時額度用罄(需等整點重置),與『查無資料』區分開。"""
+    pass
+
+def _is_rate_limit(e):
+    msg = str(e).lower()
+    return any(k in msg for k in ("limit", "402", "429", "request", "too many", "exceed"))
+
+def seconds_to_next_hour(buffer=45):
+    """距離下一個整點還有幾秒(額度每小時重置),多加 buffer 秒保險。"""
+    now = datetime.now()
+    nxt = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    return max(5, int((nxt - now).total_seconds()) + buffer)
+
+def show_usage(api):
+    """盡量印出目前 API 用量(不同版本屬性名不一,失敗就略過)。"""
+    for attr in ("api_usage", "api_usage_limit"):
         try:
-            df = api.taiwan_stock_month_revenue(stock_id=sid, start_date=start)
-            return df
+            print(f"  FinMind {attr} = {getattr(api, attr)}")
+        except Exception:
+            pass
+
+def fetch_revenue(api, sid, start):
+    """抓單檔月營收。
+    - 瞬間抖動:短重試一次(30s)。
+    - 確定是額度用罄:丟出 RateLimited,交給主迴圈『睡到整點再續、且不跳過此檔』。
+    - 其他錯誤/真的查無資料:回 None(可正常標記完成)。"""
+    for attempt in range(2):
+        try:
+            return api.taiwan_stock_month_revenue(stock_id=sid, start_date=start)
         except Exception as e:
-            msg = str(e).lower()
-            if any(k in msg for k in ("limit", "402", "request", "too many", "exceed")):
-                wait = 60 * (attempt + 1)
-                print(f"  ! 限流,等 {wait}s 後重試 ({attempt+1}/{MAX_RETRY})")
-                time.sleep(wait)
-            else:
-                print(f"  ! {sid} 取數失敗:{e}")
-                return None
-    print(f"  ! {sid} 重試 {MAX_RETRY} 次仍失敗,跳過")
-    return None
+            if _is_rate_limit(e):
+                if attempt == 0:
+                    time.sleep(30)
+                    continue
+                raise RateLimited(str(e))
+            print(f"  ! {sid} 取數失敗(非限流):{e}")
+            return None
+    raise RateLimited("retry exhausted")
 
 
 # ---------- 分析 ----------
@@ -221,15 +243,27 @@ def main():
     done = load_done()
     results = list(done.values())
     todo = [t for t in tickers if t not in done]
-    print(f"總清單 {len(tickers)} 檔,待掃 {len(todo)} 檔,起始日 {start}\n")
+    print(f"總清單 {len(tickers)} 檔,待掃 {len(todo)} 檔,起始日 {start}")
+    show_usage(api)
+    print()
 
-    for i, sid in enumerate(todo, 1):
-        df = fetch_revenue(api, sid, start)
+    i = 0
+    while i < len(todo):
+        sid = todo[i]
+        try:
+            df = fetch_revenue(api, sid, start)
+        except RateLimited:
+            wait = seconds_to_next_hour()
+            print(f"  ⏸ FinMind 每小時額度用罄 → 睡到下一個整點再續(約 {wait//60} 分 {wait%60} 秒)。"
+                  f"不跳過、不標記 {sid},醒來重抓。")
+            time.sleep(wait)
+            continue                      # 同一檔重試,i 不前進、不寫 progress
         res = analyze(df)
         row = {"代號": sid, "分類": label(res)}
         row.update(res or {})
         results.append(row)
-        append_progress(row)
+        append_progress(row)              # 只有「真的抓到/真的查無資料」才記錄完成
+        i += 1
         print(f"[{i}/{len(todo)}] {sid:6s} {row['分類']:14s} "
               f"成長比率 {row.get('近36月成長比率%','-')}% 連續 {row.get('連續成長月數','-')}月")
         time.sleep(RATE_SLEEP)

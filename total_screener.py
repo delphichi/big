@@ -27,11 +27,33 @@ pip install finmind pandas numpy openpyxl requests
   修3 虧損時 PE<=0 不算便宜 → 估值關在 pe<=0 時不適用(None);百分位只用正值歷史,避免負PE誤判便宜。
 """
 
-import os, time
+import os, time, pickle, datetime as _dt
 import numpy as np
 import pandas as pd
 
-TICKERS = ["2327", "2303", "2492", "6239", "3037", "3189"]  # 台積電 聯發科 瑞昱 南亞科 緯創 台燿
+# ---- 抓取節流 / 快取 / 限流(因應 FinMind 每小時請求上限,讓數百檔可分輪續跑)----
+SLEEP = float(os.environ.get("SCREENER_SLEEP", "1.2"))          # 每檔間隔秒數
+CACHE_DIR = os.environ.get("SCREENER_CACHE", ".cache/screener")  # 當日快取目錄
+USE_CACHE = os.environ.get("SCREENER_NO_CACHE", "") == ""        # 預設開啟快取
+RATELIMIT_WAIT = int(os.environ.get("SCREENER_RATELIMIT_WAIT", "0"))  # >0:撞限流時睡N秒再續(無人值守)
+
+def _cache_path(sid):
+    return os.path.join(CACHE_DIR, f"{sid}.pkl")
+
+def _cache_fresh(path):
+    """只採用『當日(UTC)』的快取,避免跨日/跨月讀到過期財報。"""
+    if not os.path.exists(path):
+        return False
+    mt = _dt.datetime.utcfromtimestamp(os.path.getmtime(path)).date()
+    return mt == _dt.datetime.utcnow().date()
+
+def is_rate_limit(e):
+    """限流或被封 IP 都該停下來續跑(再打也是白打,還可能加重封鎖)。"""
+    s = str(e).lower()
+    return ("upper limit" in s or "reach the upper" in s or "402" in s
+            or "ban" in s)        # ip banned
+
+TICKERS = ["2330", "2454", "2379", "2408", "3231", "6274"]  # 台積電 聯發科 瑞昱 南亞科 緯創 台燿
 
 
 def load_tickers():
@@ -104,6 +126,16 @@ def fetch_price(dl, sid, start):
     return out[out["close"] > 0]
 
 def fetch_all(dl, sid):
+    """抓單檔六個資料集。預設啟用當日磁碟快取:重跑時已抓過的直接讀快取、不再打 API,
+    這樣撞到 FinMind 限流後下一輪能『續跑』,只補沒抓到的。
+    關閉快取:設環境變數 SCREENER_NO_CACHE=1;自訂目錄:SCREENER_CACHE=路徑。"""
+    path = _cache_path(sid)
+    if USE_CACHE and _cache_fresh(path):
+        try:
+            with open(path, "rb") as f:
+                return pickle.load(f)
+        except Exception:
+            pass
     out = {
         "inc": dl.taiwan_stock_financial_statement(stock_id=sid, start_date=START_FUND),
         "bal": dl.taiwan_stock_balance_sheet(stock_id=sid, start_date=START_FUND),
@@ -112,7 +144,14 @@ def fetch_all(dl, sid):
         "per": get_per(dl, sid, START_FUND),
         "price": fetch_price(dl, sid, START_PRICE),
     }
-    time.sleep(1.2)
+    if USE_CACHE:                      # 只有完整抓成功(未中途拋限流)才會走到這裡存檔
+        try:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(path, "wb") as f:
+                pickle.dump(out, f)
+        except Exception:
+            pass
+    time.sleep(SLEEP)
     return out
 
 
@@ -377,15 +416,52 @@ def main():
     bench = fetch_price(dl, BENCHMARK, START_PRICE)
     bench = bench["close"] if not bench.empty else pd.Series(dtype=float)
     rows, audits, freshes, raws = [], [], [], {}
-    for sid in TICKERS:
-        print(f"評估 {sid} ...")
+    done = errs = 0
+    remaining = []
+    hit_limit = False
+    for idx, sid in enumerate(TICKERS):
+        if hit_limit:
+            remaining.append(sid); continue
+        print(f"評估 {sid} ...({idx+1}/{len(TICKERS)})")
         try:
             raw = fetch_all(dl, sid)
             r, audit, fresh = assess(sid, raw, bench)
             rows.append(r); audits.append(audit); freshes.append(fresh); raws[sid] = raw
+            done += 1
         except Exception as e:
-            print(f"  ! {sid} 失敗:{e}")
+            if is_rate_limit(e):
+                if RATELIMIT_WAIT > 0:    # 無人值守模式:睡一陣子再重試同一檔
+                    print(f"  ⏳ 撞 FinMind 限流,睡 {RATELIMIT_WAIT}s 後重試 {sid} ...")
+                    time.sleep(RATELIMIT_WAIT)
+                    try:
+                        raw = fetch_all(dl, sid)
+                        r, audit, fresh = assess(sid, raw, bench)
+                        rows.append(r); audits.append(audit); freshes.append(fresh); raws[sid] = raw
+                        done += 1
+                        continue
+                    except Exception as e2:
+                        e = e2
+                print(f"  ⛔ FinMind 限流/封IP({e}),於 {sid} 停止。已完成 {done} 檔;"
+                      f"其餘 {len(TICKERS) - idx} 檔留待下輪(快取會跳過已完成的)。"
+                      f"被封 IP 時請等更久(數十分鐘~數小時)再續。")
+                hit_limit = True
+                remaining.append(sid)
+            else:
+                print(f"  ! {sid} 失敗:{e}")
+                errs += 1
 
+    write_output(rows, audits, freshes, raws, dump_raw=DUMP_RAW)
+    print(f"(本輪成功 {done} 檔)")
+    if remaining:
+        print(f"⚠ 尚有 {len(remaining)} 檔未完成(限流中斷)。"
+              f"稍後(約一小時後額度回補)再執行一次 total_screener.py 即可續跑——"
+              f"已完成的會走當日快取、不再耗用額度。\n  未完成範例:{remaining[:10]}{' …' if len(remaining)>10 else ''}")
+    if errs:
+        print(f"另有 {errs} 檔因其他原因失敗(非限流)。")
+
+
+def write_output(rows, audits, freshes, raws, dump_raw=False):
+    """把評估結果寫成五維總篩選 xlsx(main 與 total_screener_bulk 共用)。"""
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.sort_values("總評分", ascending=False)
@@ -409,17 +485,18 @@ def main():
         if freshes:
             pd.DataFrame(freshes).to_excel(xw, sheet_name="資料時效", index=False)
         # 每檔原始三表 + 月營收(逐列核對來源)
-        if DUMP_RAW:
+        if dump_raw:
             for sid, raw in raws.items():
                 for key, label in [("inc","損益表"),("bal","資產負債"),("cf","現金流"),("rev","月營收")]:
                     d = raw.get(key)
                     if d is not None and not d.empty:
                         d.tail(RAW_TAIL*40 if key!="rev" else 30).to_excel(
                             xw, sheet_name=f"{sid}_{label}"[:31], index=False)
-    print(f"\n已輸出:{OUTPUT}\n")
+    print(f"\n已輸出:{OUTPUT}")
     pd.set_option("display.unicode.east_asian_width", True); pd.set_option("display.width", 260)
     show = [c for c in ["代號","總評分","分類","五關","卡在","基本面","共振分數"] if c in df.columns]
-    print(df[show].to_string(index=False))
+    if not df.empty:
+        print(df[show].to_string(index=False))
 
 
 if __name__ == "__main__":

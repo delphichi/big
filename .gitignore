@@ -12,3 +12,6 @@ sensor_input.json
 # FinMind token / 任何機密一律不進 git(設定見 README「設定 FINMIND_TOKEN」)
 .env
 *.token
+
+# 五維篩選的當日抓取快取(供限流後續跑;不需進 git)
+.cache/

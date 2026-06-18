@@ -158,11 +158,23 @@ python3 total_screener.py
 python3 screener_to_seeds.py data/台股五維總篩選.xlsx --out data/SLCA_種子_實測.md
 ```
 
-> ⚠️ **數百檔的現實**：`total_screener` 逐檔抓 5 年財報，每檔約 6 次 API + 1.2 秒間隔。
-> 300 檔約 1800 次請求，FinMind 註冊版約 600 次/小時 → 可能要分批或數小時，GitHub Actions 單次
-> 6 小時上限要留意（`total-screen.yml` 的 timeout 也要調高）。先用 `--keywords` 跑一類試水溫。
-> 真正要掃滿上市櫃 ~2000 檔，得改用「按日期批次抓全市場」的資料層（另一個較大的工程）。
-> 把 `universe.txt` commit 進 repo，GitHub Actions 才讀得到。
+> ⚠️ **數百檔會撞 FinMind 每小時限流**：`total_screener` 逐檔抓 5 年財報，每檔約 6 次 API。
+> 800 檔約 5000 次請求，FinMind 註冊版約 600 次/小時 → **一輪跑不完**。
+>
+> **已內建「快取 + 續跑」**：每檔抓成功就存當日快取（`.cache/screener/`），撞到限流會**優雅停止**並印出
+> 還剩幾檔。**約一小時後額度回補，再執行一次 `total_screener.py` 即可續跑**——已完成的走快取、不再耗額度，
+> 跑個幾輪就能蓋完 800 檔。相關環境變數：
+>
+> ```bash
+> python3 total_screener.py                 # 撞限流就停,下次續跑
+> SCREENER_RATELIMIT_WAIT=3600 python3 total_screener.py   # 無人值守:撞限流睡1小時再續(同一個process跑完)
+> SCREENER_SLEEP=2 python3 total_screener.py # 放慢每檔間隔
+> SCREENER_NO_CACHE=1 python3 total_screener.py            # 關快取強制重抓
+> ```
+>
+> GitHub Actions 已用 `actions/cache` 跨輪保留快取;但單次 6 小時上限,真要掃滿 ~2000 檔仍建議改用
+> 「按日期批次抓全市場」的資料層(另一個較大的工程)。把 `universe.txt` commit 進 repo,Actions 才讀得到。
+> 先用 `--keywords 半導體` 跑一類試水溫。
 
 ### 從五維總篩選直接出種子（`screener_to_seeds.py`）
 

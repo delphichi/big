@@ -401,7 +401,7 @@ def _urgency(r):
     return "低"
 
 
-def render_report(res):
+def render_report(res, full=False):
     L = []
     L.append(f"# SLCA 投資感測器 v2 · 本週種子")
     L.append(f"> 掃描日期:{res.get('as_of') or _dt.date.today().isoformat()}　"
@@ -451,6 +451,74 @@ def render_report(res):
         L.append("並依各顆「信心分數」決定深化力度;A級才值得全套深化分析。")
     else:
         L.append("本週無種子可交棒。")
+
+    if full and res["seeds"]:
+        L.append("")
+        L.append(render_handoff(res))
+        L.append("")
+        L.append(render_reality_check(res))
+        L.append("")
+        L.append(render_evolution_log(res))
+    return "\n".join(L)
+
+
+def render_handoff(res):
+    """步驟:交棒 SLCA v5 —— 每顆種子產生一段可直接貼上的指令(對齊 Prompt『與 SLCA v5 的銜接』)。"""
+    L = ["---", "## 交棒指令(逐顆,直接複製貼入 SLCA v5 對話)"]
+    for i, r in enumerate(res["seeds"], 1):
+        tk = r["tk"]
+        L.append("")
+        L.append(f"### 種子 #{i}　{r['label']}　[{r['grade']}級]")
+        L.append("```")
+        L.append(render_seed(i, r))
+        L.append("")
+        L.append("以這顆種子為起點執行 SLCA 認知循環。")
+        L.append(f"建議方向:{tk.get('suggest_direction') or '深化'}")
+        L.append(f"信心分數 {r['conf']},請依此決定深化力度。")
+        L.append("請特別針對殺死條件與共識脆弱前提執行紅隊攻擊。")
+        L.append("```")
+    return "\n".join(L)
+
+
+def render_reality_check(res):
+    """步驟:現實驗證 —— 把每顆種子的 Q3 可觀察事件 + 殺死條件,排成可追蹤的檢核表。
+    檢核截止日 = 掃描日 + 觀察期(月)。"""
+    as_of = res.get("as_of") or _dt.date.today().isoformat()
+    try:
+        base = _dt.date.fromisoformat(as_of)
+    except Exception:
+        base = _dt.date.today()
+    L = ["---", "## 現實驗證追蹤表(Reality Loop · Q3 是否兌現)",
+         "", "| 種子 | 可觀察事件(Q3) | 檢核截止 | 殺死條件 | 狀態 |",
+         "|---|---|---|---|---|"]
+    for i, r in enumerate(res["seeds"], 1):
+        tk = r["tk"]
+        months = int(tk.get("observe_months") or 12)
+        # 近似:每月 30 天推算截止日,免依賴外部套件
+        due = base + _dt.timedelta(days=months * 30)
+        q3 = (tk.get("popper", {}) or {}).get("q3_observable") or "—"
+        kill = tk.get("kill_condition") or "—"
+        L.append(f"| #{i} {r['label']} | {q3} | {due.isoformat()} | {kill} | ☐ 待驗證 |")
+    L.append("")
+    L.append("> 驗證後:兌現 → 強化該差異類型 DS 權重;殺死條件成立 → 記錄並分析哪步出錯;")
+    L.append("> 假陽性反覆出現 → 考慮新增死亡模式。結果回填下方演化記錄,並回寫感測器。")
+    return "\n".join(L)
+
+
+def render_evolution_log(res):
+    """步驟:演化記錄欄 —— 產生本次掃描的紀錄列(後續結果待現實驗證後回填)。"""
+    as_of = res.get("as_of") or _dt.date.today().isoformat()
+    n = len(res["seeds"])
+    types = "、".join(sorted({"＋".join(r["calc"]["types"]) for r in res["seeds"]})) or "—"
+    confs = "／".join(str(r["conf"]) for r in res["seeds"]) or "—"
+    dss = "／".join(str(r["ds"]) for r in res["seeds"]) or "—"
+    L = ["---", "## 演化記錄欄(本次掃描;結果欄待現實驗證後回填)",
+         "", "```",
+         "[日期] | 輸出N顆 | 差異類型 | DS | 信心分數 | 後來結果 | 學到什麼 | 死亡模式庫變動",
+         f"{as_of} | {n}顆 | {types} | {dss} | {confs} | (待驗證) | (待回填) | (無)",
+         "```",
+         "", "> 將此列貼到專案的演化記錄;待 Q3 事件或殺死條件揭曉後回填『後來結果/學到什麼』,",
+         "> 並依學習更新 DS 權重與死亡模式庫(Reality Loop 的回寫)。"]
     return "\n".join(L)
 
 
@@ -578,6 +646,8 @@ def main():
     ap.add_argument("--out", default="data/SLCA_種子.md", help="種子報告輸出路徑(.md)")
     ap.add_argument("--auto", action="store_true", help="額外用 FinMind 自動偵測①②③(需 FINMIND_TOKEN)")
     ap.add_argument("--template", action="store_true", help="印出空白輸入模板 JSON 後結束")
+    ap.add_argument("--full", action="store_true",
+                    help="種子後附完整 Reality Loop:交棒指令 + 現實驗證追蹤表 + 演化記錄列")
     args = ap.parse_args()
 
     if args.template or not args.input:
@@ -592,7 +662,7 @@ def main():
         data = auto_detect(data)
 
     res = run_sensor(data)
-    report = render_report(res)
+    report = render_report(res, full=args.full)
 
     if args.out:
         os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

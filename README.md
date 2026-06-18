@@ -80,6 +80,35 @@ DEFAULT_STOCKS = [
 
 ---
 
+## 🔑 設定 FINMIND_TOKEN
+
+`total_screener.py`、`screener_to_seeds.py` 以及感測器的 `--auto`／`--full` 都會用 FinMind 抓資料，
+資料量大，**務必設 token**（沒設會被限流或退回「待驗證」）。Token 在 [FinMind 會員後台](https://finmindtrade.com/)
+產生。**Token 是機密，絕對不要寫進程式碼或 commit 進 repo。**
+
+**本機（當前終端機，臨時）**
+
+```bash
+export FINMIND_TOKEN="你的token"      # 注意:此指令本身會留在 shell 歷史
+python3 total_screener.py
+```
+
+**本機（持久，建議用 .env，已被 .gitignore 忽略）**
+
+```bash
+echo 'FINMIND_TOKEN=你的token' >> .env   # .env 不會進 git
+set -a; source .env; set +a              # 載入到環境變數後再執行
+```
+
+**GitHub Actions（排程/手動觸發用，最安全）**
+
+`Settings` → `Secrets and variables` → `Actions` → `New repository secret`
+名稱填 `FINMIND_TOKEN`、值貼上 token。各 workflow 已用 `${{ secrets.FINMIND_TOKEN }}` 讀取，無需改碼。
+
+> ⚠️ 若 token 曾經外流（貼到聊天、訊息、截圖、commit…），請到 FinMind 後台**重新產生**一個，舊的作廢。
+
+---
+
 ## 🧭 SLCA 投資感測器 v2（`sensor.py`）
 
 把 `SLCA_______Prompt_v2.md` 的偵測流程程式化：從市場差異產生「種子」，交棒給 SLCA v5 分析。

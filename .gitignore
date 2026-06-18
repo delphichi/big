@@ -5,3 +5,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+# 感測器每週個人輸入檔(可能含真實持股,保持本地;範例見 sensor_input.example.json)
+sensor_input.json

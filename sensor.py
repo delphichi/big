@@ -579,8 +579,9 @@ def main():
     args = ap.parse_args()
 
     if args.template or not args.input:
-        if not args.input:
-            print("（未提供 --input,印出空白輸入模板;請填好後以 --input 執行)\n")
+        if not args.input:   # 提示走 stderr,避免污染被重導向的 JSON(stdout)
+            import sys
+            print("（未提供 --input,印出空白輸入模板;請填好後以 --input 執行)", file=sys.stderr)
         print(json.dumps(build_input_template(), ensure_ascii=False, indent=2))
         return
 

@@ -44,8 +44,8 @@ def _cache_fresh(path):
     """只採用『當日(UTC)』的快取,避免跨日/跨月讀到過期財報。"""
     if not os.path.exists(path):
         return False
-    mt = _dt.datetime.utcfromtimestamp(os.path.getmtime(path)).date()
-    return mt == _dt.datetime.utcnow().date()
+    mt = _dt.datetime.fromtimestamp(os.path.getmtime(path), _dt.timezone.utc).date()
+    return mt == _dt.datetime.now(_dt.timezone.utc).date()
 
 def is_rate_limit(e):
     """限流或被封 IP 都該停下來續跑(再打也是白打,還可能加重封鎖)。"""

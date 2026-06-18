@@ -119,7 +119,9 @@ def hard_filter(tk, north):
 def base_of(diff, types_present):
     """單一差異的基礎分。敘事搭配②③時提升;敘事單獨保持低分(且鐵律3會擋掉輸出)。"""
     t = diff["type"]
-    base = diff.get("base_ds", DIFF_TYPES[t]["default"])
+    base = diff.get("base_ds")            # 缺鍵或填 null 都回退到該差異類型的預設權重
+    if base is None:
+        base = DIFF_TYPES[t]["default"]
     if t == NARRATIVE:
         combined = ("基本面差異" in types_present) or ("矛盾訊號" in types_present)
         if combined:

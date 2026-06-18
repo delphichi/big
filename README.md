@@ -112,6 +112,19 @@ python3 sensor.py --input sensor_input.json --auto
 python3 sensor.py --input sensor_input.json --full --out data/SLCA_種子.md
 ```
 
+### 從五維總篩選直接出種子（`screener_to_seeds.py`）
+
+已經跑過 `total_screener.py` 的話，可把它的 xlsx **直接橋接成種子**，免再手填輸入：
+
+```bash
+pip install openpyxl
+python3 screener_to_seeds.py data/台股五維總篩選.xlsx --out data/SLCA_種子_實測.md
+```
+
+規則式從五維欄位偵測 ②基本面／③矛盾（便宜的好公司／品質高但股價落後／品質高但燒錢），
+純資金假突破套用死亡模式 005；現實驗證的客觀現況直接取自 xlsx（含各檔損益表算毛利率/淨利），
+質性欄位（共識／三問）以模板生成並標註「需人工確認」。
+
 > **引擎只用 Python 標準庫**，沒裝 FinMind／pandas 也能跑 —— 量化差異（①②③）可選擇用
 > `--auto` 從 FinMind 自動補入，質性差異（④敘事／⑤反共識／⑥時間）與三問答案則由輸入檔提供。
 > 也可由 `Actions → SLCA 投資感測器 v2（手動）` 手動觸發。

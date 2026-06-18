@@ -640,21 +640,29 @@ def _verdict(types, s):
     """依種子的差異類型 + 客觀快照,給輕量啟發式判讀(仍需人眼確認)。"""
     types = set(types); notes = []
     roe_p = s.get("ROE百分位"); pos = s.get("股價位置") or ""; gm_t = s.get("毛利率趨勢")
-    ni2 = s.get("連兩季淨利改善")
+    ni2 = s.get("連兩季淨利改善"); rel = s.get("相對報酬%")
+    cashq = s.get("含金量"); fcf = s.get("近四季FCF")
     if "矛盾訊號" in types:
-        if roe_p is not None and roe_p >= 70 and "低" in pos:
-            notes.append(f"ROE仍居高位(百分位{roe_p})而股價仍偏低 → 品質/定價背離尚在,矛盾未收斂")
-        elif (roe_p is not None and roe_p < 50) or "高" in pos:
-            notes.append("ROE百分位回落或股價已走高 → 矛盾收斂中,留意是否已被定價")
-    if "基本面差異" in types:
-        if gm_t:
-            notes.append(f"毛利率趨勢{gm_t}" + ("(支持基本面假說)" if gm_t == "上升" else "(與基本面假說相左)" if gm_t == "下滑" else ""))
+        # 品質/現金背離:含金量<0.8 或 FCF<0 → 品質可能是帳面幻覺
+        if (cashq is not None and cashq < 0.8) or (fcf is not None and fcf < 0):
+            notes.append(f"含金量{cashq}、近四季FCF{fcf}億 仍偏弱 → 品質/現金背離未解,留意品質幻覺/燒錢")
+        # 落後型矛盾:看相對報酬而非絕對股價位置
+        elif rel is not None and rel < 0 and roe_p is not None and roe_p >= 70:
+            notes.append(f"ROE百分位{roe_p}(品質高)但近半年相對報酬{rel}%(仍落後大盤) → 矛盾未收斂")
+        elif rel is not None and rel > 0:
+            notes.append(f"相對報酬已轉正({rel}%) → 矛盾收斂中,留意是否已被定價")
+        elif roe_p is not None and roe_p >= 70 and "低" in pos:
+            notes.append(f"ROE仍居高位(百分位{roe_p})而股價仍偏低 → 品質/定價背離尚在")
+    if "基本面差異" in types and gm_t:
+        notes.append(f"毛利率趨勢{gm_t}" + ("(支持基本面假說)" if gm_t == "上升"
+                     else "(與基本面假說相左)" if gm_t == "下滑" else ""))
     if "價格差異" in types and pos:
         notes.append(f"股價{pos}")
     if ni2 is not None:
-        notes.append("連兩季淨利改善" + ("成立(死亡模式003『單季幻覺』風險降低)" if ni2 else "不成立(僅單季,留意業績轉機幻覺)"))
+        notes.append("連兩季淨利改善" + ("成立(死亡模式003『單季幻覺』風險降低)" if ni2
+                     else "不成立(僅單季,留意業績轉機幻覺)"))
     if types & {"時間差異", "敘事差異", "反共識裂縫"}:
-        notes.append("事件/敘事面(2nm時程、共識前提等)非財報可量化,需人工追蹤")
+        notes.append("事件/敘事面(時程、共識前提等)非財報可量化,需人工追蹤")
     return "；".join(notes) if notes else "客觀數據已附,請人工對照 Q3 與殺死條件判定"
 
 

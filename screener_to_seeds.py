@@ -29,7 +29,7 @@ import sensor
 # 北極星:可依需要改。能力圈外的標的會被硬過濾。
 NORTH_STAR = {
     "philosophy": "用合理價格買進品質持續創高、但被市場錯誤定價的公司,持有至差異收斂",
-    "circle": ["金融銀行證券", "半導體", "網通", "被動元件", "PC/伺服器代工"],
+    "circle": ["半導體", "網通", "被動元件", "PC/伺服器代工"],
     "market_cap_min_yi": 100, "timeframe": "12–24個月", "history_success": {},
 }
 DEATH_005 = {"id": "005", "name": "純資金假突破", "penalty": 35,
@@ -103,9 +103,11 @@ def build(xlsx, as_of):
         contra, base, deaths = [], 0, []
         if pe_p is not None and pe_p <= 40 and roe_p is not None and roe_p >= 80 and cash_backed:
             contra.append(f"ROE百分位{roe_p}(品質高)但PE百分位{pe_p}(估值便宜)——便宜的好公司"); base = max(base, 88)
-        # 中度落後才算錯殺;崩跌(<-30%)排除,那通常是市場知道了什麼
-        if roe_p is not None and roe_p >= 80 and rel is not None and -30 <= rel < 0 and cash_backed:
-            contra.append(f"ROE百分位{roe_p}(品質高)但近半年相對報酬{rel}%(中度落後大盤)"); base = max(base, 78)
+        # 中度落後才算錯殺:① 崩跌(<-30%)排除(市場知道了什麼);② 估值極端(PE百分位>85/估值透支)排除
+        #   —— 北極星要「合理價格買被低估的好公司」,貴到歷史天花板的股票小跌不算被低估
+        val_extreme = (pe_p is not None and pe_p > 85) or cat.startswith("🏔")
+        if roe_p is not None and roe_p >= 80 and rel is not None and -30 <= rel < 0 and cash_backed and not val_extreme:
+            contra.append(f"ROE百分位{roe_p}(品質高)、估值不極端但近半年相對報酬{rel}%(中度落後大盤)"); base = max(base, 78)
         # 品質百分位高但燒錢:品質幻覺 → 命中死亡模式006,扣分降為觀察/忽略,不該成A級
         if ((roe_p and roe_p >= 80) or (roic_p and roic_p >= 80)) and cashq is not None and cashq < 0.8:
             contra.append(f"品質百分位高,但含金量{cashq}<0.8、FCF{fcf}億(品質幻覺/燒錢,疑似陷阱)")

@@ -48,8 +48,10 @@ def _cache_fresh(path):
     return mt == _dt.datetime.utcnow().date()
 
 def is_rate_limit(e):
+    """限流或被封 IP 都該停下來續跑(再打也是白打,還可能加重封鎖)。"""
     s = str(e).lower()
-    return "upper limit" in s or "reach the upper" in s or "402" in s
+    return ("upper limit" in s or "reach the upper" in s or "402" in s
+            or "ban" in s)        # ip banned
 
 TICKERS = ["2330", "2454", "2379", "2408", "3231", "6274"]  # 台積電 聯發科 瑞昱 南亞科 緯創 台燿
 
@@ -439,8 +441,9 @@ def main():
                         continue
                     except Exception as e2:
                         e = e2
-                print(f"  ⛔ 撞到 FinMind 每小時限流,於 {sid} 停止。已完成 {done} 檔;"
-                      f"其餘 {len(TICKERS) - idx} 檔留待下輪(快取會跳過已完成的)。")
+                print(f"  ⛔ FinMind 限流/封IP({e}),於 {sid} 停止。已完成 {done} 檔;"
+                      f"其餘 {len(TICKERS) - idx} 檔留待下輪(快取會跳過已完成的)。"
+                      f"被封 IP 時請等更久(數十分鐘~數小時)再續。")
                 hit_limit = True
                 remaining.append(sid)
             else:

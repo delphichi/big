@@ -42,6 +42,11 @@ def _num(v):
     try: return float(v)
     except (TypeError, ValueError): return None
 
+def _grow(v):
+    """營收正成長欄是 'X/Y' 字串;沒資料時是 '—'。穩健取 X,取不到回 0。"""
+    try: return int(str(v).split("/")[0])
+    except (TypeError, ValueError, AttributeError, IndexError): return 0
+
 
 def margin_ni(wb, sid):
     """從 <sid>_損益表 算 毛利率近4季/趨勢、連兩季淨利是否改善。"""
@@ -76,7 +81,7 @@ def build(xlsx, as_of):
     for row in summ[1:]:
         sid = str(C(row, "代號"))
         cat = C(row, "分類") or ""
-        grow = int(str(C(row, "營收正成長")).split("/")[0]) if C(row, "營收正成長") else 0
+        grow = _grow(C(row, "營收正成長"))
         roe_p, roic_p, pe_p = _num(C(row, "ROE百分位")), _num(C(row, "ROIC百分位")), _num(C(row, "PE百分位"))
         cashq, fcf, rel = _num(C(row, "含金量")), _num(C(row, "近四季FCF")), _num(C(row, "相對報酬%"))
         lit = C(row, "亮燈") or ""

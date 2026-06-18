@@ -423,15 +423,19 @@ def render_report(res, full=False):
     else:
         L.append("> **空週**。本週無差異通過全部過濾 —— 沒有差異就是沒有機會,不發明機會(鐵律2)。")
 
-    def fmt(items):
+    def fmt(items, cap=20):
         if not items:
             return "—"
+        items = sorted(items, key=lambda it: it[1], reverse=True)   # 依DS高到低
         out = []
-        for it in items:
+        for it in items[:cap]:
             lab, ds = it[0], it[1]
             why = it[2] if len(it) > 2 else ""
             out.append(f"{lab}(DS{ds}{('；' + why) if why else ''})")
-        return "\n".join("    - " + x for x in out)
+        lines = ["    - " + x for x in out]
+        if len(items) > cap:
+            lines.append(f"    - …其餘 {len(items) - cap} 檔(DS 較低,略)")
+        return "\n".join(lines)
     L.append("")
     L.append("---")
     L.append("## 其餘標的去向(透明化)")

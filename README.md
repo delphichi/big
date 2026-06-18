@@ -141,6 +141,29 @@ python3 sensor.py --input sensor_input.json --auto
 python3 sensor.py --input sensor_input.json --full --out data/SLCA_種子.md
 ```
 
+### 擴大股池到能力圈數百檔（`build_universe.py`）
+
+`total_screener.py` 預設只跑寫死的 6 檔。要掃你**能力圈的數百檔**，用 `build_universe.py`
+從 FinMind 全市場清單按產業別篩出 `universe.txt`，`total_screener.py` 會自動讀它：
+
+```bash
+# 1) 產生能力圈股池（需 FINMIND_TOKEN）
+python3 build_universe.py                          # 半導體/通信網路/電子零組件/電腦及週邊/金融
+python3 build_universe.py --keywords 半導體 金融     # 只要某幾類
+
+# 2) 跑五維篩選（自動讀 universe.txt；股池>12檔會自動關閉原始表 dump 避免巨檔）
+python3 total_screener.py
+
+# 3) 橋接成種子
+python3 screener_to_seeds.py data/台股五維總篩選.xlsx --out data/SLCA_種子_實測.md
+```
+
+> ⚠️ **數百檔的現實**：`total_screener` 逐檔抓 5 年財報，每檔約 6 次 API + 1.2 秒間隔。
+> 300 檔約 1800 次請求，FinMind 註冊版約 600 次/小時 → 可能要分批或數小時，GitHub Actions 單次
+> 6 小時上限要留意（`total-screen.yml` 的 timeout 也要調高）。先用 `--keywords` 跑一類試水溫。
+> 真正要掃滿上市櫃 ~2000 檔，得改用「按日期批次抓全市場」的資料層（另一個較大的工程）。
+> 把 `universe.txt` commit 進 repo，GitHub Actions 才讀得到。
+
 ### 從五維總篩選直接出種子（`screener_to_seeds.py`）
 
 已經跑過 `total_screener.py` 的話，可把它的 xlsx **直接橋接成種子**，免再手填輸入：

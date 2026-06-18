@@ -32,6 +32,29 @@ import numpy as np
 import pandas as pd
 
 TICKERS = ["2330", "2454", "2379", "2408", "3231", "6274"]  # 台積電 聯發科 瑞昱 南亞科 緯創 台燿
+
+
+def load_tickers():
+    """有 universe.txt(或環境變數 UNIVERSE_FILE 指定的檔)就讀它,否則用上面的預設清單。
+    universe.txt 每行第一個 token 是代號,# 之後是註解;空行/#開頭略過。見 build_universe.py。"""
+    path = os.environ.get("UNIVERSE_FILE", "universe.txt")
+    if os.path.exists(path):
+        out = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                code = line.split("#", 1)[0].split()[0].strip()
+                if code:
+                    out.append(code)
+        if out:
+            print(f"讀取股池 {path}:{len(out)} 檔")
+            return out
+    return TICKERS
+
+
+TICKERS = load_tickers()
 START_FUND = "2019-01-01"     # 財報/月營收/PER 歷史(算百分位)
 START_PRICE = "2023-06-01"    # 每日股價(算斜率/52週高)
 BENCHMARK = "0050"
@@ -344,7 +367,9 @@ def assess(sid, raw, bench):
 
 
 # ---------- 主流程 ----------
-DUMP_RAW = True          # 是否輸出每檔原始三表(供逐列驗證);檔案會變大
+# 是否輸出每檔原始三表(供逐列驗證);檔案會變大。股池大時自動關閉,避免上千分頁的巨檔。
+# 注意:關閉後 screener_to_seeds 無法從損益表算毛利率/連兩季淨利(會顯示—,其餘照常)。
+DUMP_RAW = len(TICKERS) <= 12
 RAW_TAIL = 12            # 原始表只保留最近 N 季,控制檔案大小
 
 def main():

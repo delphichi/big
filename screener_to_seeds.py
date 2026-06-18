@@ -170,6 +170,12 @@ def main():
     as_of = args.as_of or dt.date.today().isoformat()
 
     data, verify = build(args.xlsx, as_of)
+    # 註冊自訂死亡模式(005/006)到感測器;run_sensor 不處理 death_patterns_extra(只有 load_input 會)
+    for p in data.get("death_patterns_extra", []):
+        sensor.DEATH_PATTERNS[str(p["id"])] = dict(
+            name=p.get("name", ""), penalty=int(p.get("penalty", 30)),
+            trigger=p.get("trigger", ""), history=p.get("history", ""),
+            fail_rate=p.get("fail_rate", ""), handling=p.get("handling", ""))
     res = sensor.run_sensor(data)
     res["verify"] = verify
     report = sensor.render_report(res, full=True)

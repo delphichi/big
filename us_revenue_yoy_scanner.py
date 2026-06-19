@@ -42,7 +42,9 @@ import numpy as np
 from datetime import datetime
 
 # ---------- 設定 ----------
-USER_AGENT = "ChangeMe yourname your_email@example.com"   # ★ 必改:SEC 要求帶聯絡資訊
+# SEC 規定每個請求都要帶可辨識的 User-Agent(含聯絡 email),否則會被擋(403)。
+# 優先讀環境變數 SEC_USER_AGENT(GitHub Actions 用 secret 帶入);本機跑可直接改下方預設值。
+USER_AGENT = os.environ.get("SEC_USER_AGENT", "").strip() or "ChangeMe yourname your_email@example.com"
 OUTPUT     = "data/美股季營收年增掃描.xlsx"
 PROGRESS   = "data/_us_revenue_scan_progress.csv"
 CIK_CACHE  = "data/_sec_cik_map.json"
@@ -333,8 +335,10 @@ def append_progress(row):
 # ---------- 主流程 ----------
 def main():
     if "your_email@example.com" in USER_AGENT or USER_AGENT.startswith("ChangeMe"):
-        print("⚠ 請先把程式最上方的 USER_AGENT 改成『你的名字 你的email』,"
-              "否則 SEC 會擋(403)。改完再執行。")
+        print("⚠ 未設定 SEC User-Agent。SEC 要求帶『你的名字 你的email』,否則會擋(403)。\n"
+              "  GitHub Actions:repo → Settings → Secrets and variables → Actions → "
+              "新增 secret『SEC_USER_AGENT』,值填「你的名字 你的email」。\n"
+              "  本機執行:設環境變數 SEC_USER_AGENT,或直接改程式最上方的 USER_AGENT 預設值。")
         sys.exit(1)
 
     tickers = load_tickers()

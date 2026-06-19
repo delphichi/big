@@ -304,6 +304,13 @@ def load_done():
     if RESUME and os.path.exists(PROGRESS):
         try:
             df = pd.read_csv(PROGRESS, dtype={"代號": str})
+            # 進度檔 schema 檢查:欄位與目前不符(例如改過窗設定/欄名)就作廢重跑,
+            # 否則舊列會缺新欄(增長季數等)而以 NaN 混進輸出,造成污染。
+            missing = [c for c in PROG_FIELDS if c not in df.columns]
+            if missing:
+                print(f"⚠ 進度檔 {PROGRESS} schema 與目前不符(缺:{missing[:3]}…),"
+                      f"作廢重跑(不續跑)。")
+                return {}
             done = {str(r["代號"]): dict(r) for _, r in df.iterrows()}
             print(f"續跑:已完成 {len(done)} 檔,將跳過")
             return done

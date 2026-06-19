@@ -14,7 +14,12 @@
         不會被 SEC frame 的容差視窗丟季。
       * Q4 多數公司不單獨申報,改用「全年 − (Q1+Q2+Q3)」回填(同一 fy,口徑一致)。
         回填的季數會記在「Q4回填季數」欄,方便辨識哪些是合成值。
+  - 同一份 companyfacts 另抽「損益表/資產負債表/現金流量表」關鍵科目,算經營績效比率
+    (毛利率/營益率/淨利率/ROE/ROA/負債比/流動比/獲利含金量OCF淨利/自由現金流),不額外打 SEC。
+  - 股價走 Stooq(免金鑰),算最新收盤/52週高低/近1年報酬,並結合流通股數推市值/PE/PB/PS。
 輸出:data/美股季營收年增掃描.xlsx
+  - 分頁1「美股季營收年增掃描」:多窗年增掃描(同前)
+  - 分頁2「財報與股價」:一檔一列,股價估值 + 財報三表科目與比率(WITH_FINANCIALS/WITH_PRICE 控制)
 
 每檔算出:
   - 近10年/近5年/近3年/近1年 成長比率%(各窗:YoY 為正的季數 ÷ 該窗實際季數)
@@ -35,7 +40,7 @@
       撞到 403/429 會自動退避重試。掃幾百檔通常數分鐘內完成,沒有 FinMind 那種每小時額度。
 """
 
-import os, sys, time, csv, re, json
+import os, sys, time, csv, re, json, io
 import requests
 import pandas as pd
 import numpy as np
@@ -61,6 +66,10 @@ RESUME     = True
 # 多窗成長比率(季數, 欄名):同時看長期與近期,避免被單一窗誤導
 WINDOWS_Q     = [(40, "近10年"), (20, "近5年"), (12, "近3年"), (4, "近1年")]
 CLASS_WINDOW_Q = 12               # 🟢🔵🟡🔴 分類用哪個窗(季)。預設近3年(12 季)
+
+# 一併抓財報三表 + 股價(額外輸出「財報與股價」分頁)
+WITH_FINANCIALS = True            # 從同一份 SEC companyfacts 取損益/資產負債/現金流(不額外打 SEC)
+WITH_PRICE      = True            # 另抓股價(Stooq,免金鑰),算市值/PE/PB/PS;被擋時自動略過該檔
 
 # 內建清單(沒有 tickers_us.txt / .csv 時才用)
 US_TICKERS = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL"]
@@ -233,6 +242,139 @@ def quarterly_revenue(facts):
     return quarters, backfilled
 
 
+# ---------- 財報三表(同一份 companyfacts,不額外打 SEC)----------
+def _latest_value(ns, concepts, unit="USD", instant=False):
+    """取某概念清單的最新值。
+    - instant=True:資產負債表(時點值,無 start)取最新 end。
+    - instant=False:損益/現金流(期間值)取最新『年度』(~365 天)。
+    概念依清單優先序:第一個有資料的就採用(補不同公司/年份的標籤差異)。"""
+    for c in concepts:
+        node = ns.get(c)
+        if not node:
+            continue
+        best, rank = None, None
+        for u, items in node.get("units", {}).items():
+            if u != unit:
+                continue
+            for it in items:
+                v, e, s = it.get("val"), it.get("end"), it.get("start")
+                filed = it.get("filed", "")
+                if v is None or not e:
+                    continue
+                if instant:
+                    if s is not None:                       # 時點值不應有 start
+                        continue
+                else:
+                    if not s:
+                        continue
+                    try:
+                        days = (_parse_d(e) - _parse_d(s)).days
+                    except Exception:
+                        continue
+                    if not (Y_MIN_DAYS <= days <= Y_MAX_DAYS):
+                        continue
+                rk = (e, filed)
+                if rank is None or rk > rank:
+                    rank, best = rk, float(v)
+        if best is not None:
+            return best
+    return None
+
+def extract_financials(facts, rev):
+    """從 companyfacts 抽損益表/資產負債表/現金流量表關鍵科目,並算經營績效比率。
+    金額一律換成『百萬美元』。取最新年度(期間值)與最新時點(資產負債)。"""
+    f = (facts or {}).get("facts", {})
+    usg, dei = f.get("us-gaap", {}), f.get("dei", {})
+    # 損益表(年度)
+    rev_y = _latest_value(usg, REV_CONCEPTS)
+    gp    = _latest_value(usg, ["GrossProfit"])
+    op    = _latest_value(usg, ["OperatingIncomeLoss"])
+    ni    = _latest_value(usg, ["NetIncomeLoss", "ProfitLoss"])
+    eps   = _latest_value(usg, ["EarningsPerShareDiluted", "EarningsPerShareBasic"], unit="USD/shares")
+    # 資產負債表(時點)
+    assets = _latest_value(usg, ["Assets"], instant=True)
+    liab   = _latest_value(usg, ["Liabilities"], instant=True)
+    eq     = _latest_value(usg, ["StockholdersEquity",
+                                 "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"], instant=True)
+    ca     = _latest_value(usg, ["AssetsCurrent"], instant=True)
+    cl     = _latest_value(usg, ["LiabilitiesCurrent"], instant=True)
+    cash   = _latest_value(usg, ["CashAndCashEquivalentsAtCarryingValue",
+                                 "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"], instant=True)
+    ltd    = _latest_value(usg, ["LongTermDebtNoncurrent", "LongTermDebt"], instant=True) or 0
+    std    = _latest_value(usg, ["LongTermDebtCurrent", "DebtCurrent"], instant=True) or 0
+    # 現金流量表(年度)
+    ocf    = _latest_value(usg, ["NetCashProvidedByUsedInOperatingActivities",
+                                 "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"])
+    capex  = _latest_value(usg, ["PaymentsToAcquirePropertyPlantAndEquipment",
+                                 "PaymentsForCapitalImprovements"])
+    # 流通股數:優先 dei(時點),退回 us-gaap
+    shares = (_latest_value(dei, ["EntityCommonStockSharesOutstanding"], unit="shares", instant=True)
+              or _latest_value(usg, ["CommonStockSharesOutstanding"], unit="shares", instant=True))
+    # 近四季營收(TTM):用已組好的單季值加總,比年報新
+    rev_ttm = None
+    if rev:
+        ks = sorted(rev)[-4:]
+        if len(ks) == 4:
+            rev_ttm = sum(rev[k] for k in ks)
+
+    M   = lambda x: round(x / 1e6, 1) if x is not None else None        # → 百萬
+    pct = lambda n, d: round(n / d * 100, 2) if (n is not None and d) else None
+    fcf = (ocf - capex) if (ocf is not None and capex is not None) else None
+    total_debt = (ltd or 0) + (std or 0)
+    return {
+        "營收TTM(百萬)": M(rev_ttm), "營收_年(百萬)": M(rev_y),
+        "毛利率%": pct(gp, rev_y), "營益率%": pct(op, rev_y), "淨利率%": pct(ni, rev_y),
+        "EPS_年": round(eps, 2) if eps is not None else None,
+        "ROE%": pct(ni, eq), "ROA%": pct(ni, assets),
+        "負債比%": pct(liab, assets),
+        "流動比%": round(ca / cl * 100, 0) if (ca and cl) else None,
+        "獲利含金量": round(ocf / ni, 2) if (ocf is not None and ni) else None,  # OCF/淨利,<1 賺帳面
+        "營業現金流(百萬)": M(ocf), "自由現金流(百萬)": M(fcf),
+        "總資產(百萬)": M(assets), "總負債(百萬)": M(liab), "股東權益(百萬)": M(eq),
+        "現金(百萬)": M(cash),
+        "負債權益比": round(total_debt / eq, 2) if eq else None,
+        "流通股數(百萬)": round(shares / 1e6, 1) if shares else None,
+    }
+
+
+# ---------- 股價(Stooq,免金鑰)+ 估值 ----------
+def fetch_price_stooq(sym):
+    """抓日線 CSV,算最新收盤/52週高低/距高/近1年報酬。被擋或查無 → 回 {}。"""
+    s = sym.lower().replace(".", "-")
+    try:
+        r = requests.get(f"https://stooq.com/q/d/l/?s={s}.us&i=d", timeout=20)
+        if r.status_code != 200 or not r.text.startswith("Date"):
+            return {}
+        df = pd.read_csv(io.StringIO(r.text))
+        c = pd.to_numeric(df.get("Close"), errors="coerce").dropna()
+        if c.empty:
+            return {}
+        last = float(c.iloc[-1]); w = c.tail(252)
+        hi, lo = float(w.max()), float(w.min())
+        ret = (last / float(w.iloc[0]) - 1) * 100 if len(w) > 1 else None
+        return {
+            "股價": round(last, 2), "52週高": round(hi, 2), "52週低": round(lo, 2),
+            "距52週高%": round((last / hi - 1) * 100, 1) if hi else None,
+            "近1年報酬%": round(ret, 1) if ret is not None else None,
+        }
+    except Exception:
+        return {}
+
+def derive_valuation(row):
+    """用股價 × 流通股數 + 財報科目算市值/PE/PB/PS(單位:十億美元;比率用倍)。"""
+    price = row.get("股價"); sh_m = row.get("流通股數(百萬)")
+    if not price or not sh_m:
+        return {}
+    eps = row.get("EPS_年"); eq_m = row.get("股東權益(百萬)")
+    rev_m = row.get("營收TTM(百萬)") or row.get("營收_年(百萬)")
+    return {
+        "市值(十億美元)": round(price * sh_m / 1e3, 2),          # price×(sh_m×1e6)/1e9
+        "本益比PE":   round(price / eps, 1) if (eps and eps > 0) else None,
+        "股價淨值比PB": round(price * sh_m / eq_m, 2) if (eq_m and eq_m > 0) else None,
+        "股價營收比PS": round(price * sh_m / rev_m, 2) if (rev_m and rev_m > 0) else None,
+    }
+
+
 # ---------- 分析 ----------
 def analyze(rev, backfilled=frozenset(), lookback=LOOKBACK_Q):
     if not rev:
@@ -325,9 +467,19 @@ def _win_fields():
         out += [f"{n}成長比率%", f"{n}增長季數"]
     return out
 
+# 「財報與股價」分頁欄位(股價/估值在前,財報三表科目與比率在後)
+PRICE_FIELDS = ["股價", "市值(十億美元)", "本益比PE", "股價淨值比PB", "股價營收比PS",
+                "距52週高%", "近1年報酬%", "52週高", "52週低"]
+FIN_FIELDS   = ["營收TTM(百萬)", "營收_年(百萬)", "毛利率%", "營益率%", "淨利率%", "EPS_年",
+                "ROE%", "ROA%", "負債比%", "流動比%", "獲利含金量",
+                "營業現金流(百萬)", "自由現金流(百萬)", "總資產(百萬)", "總負債(百萬)",
+                "股東權益(百萬)", "現金(百萬)", "負債權益比", "流通股數(百萬)"]
+
 PROG_FIELDS = (["代號", "分類", "最新季", "最新季年增%", "可比季數"]
                + _win_fields()
-               + ["近4季樣態", "連續成長季數", f"近{YEARS}年平均年增%", "Q4回填季數"])
+               + ["近4季樣態", "連續成長季數", f"近{YEARS}年平均年增%", "Q4回填季數"]
+               + (PRICE_FIELDS if WITH_PRICE else [])
+               + (FIN_FIELDS if WITH_FINANCIALS else []))
 
 def append_progress(row):
     os.makedirs(os.path.dirname(PROGRESS), exist_ok=True)
@@ -364,33 +516,51 @@ def main():
         if cik is None:
             row = {"代號": sym, "分類": "— 查無CIK(非SEC財報/ETF/ADR)"}
         else:
-            rev, backfilled = quarterly_revenue(fetch_facts(cik))
+            facts = fetch_facts(cik)                       # 只打一次,營收+財報三表共用
+            rev, backfilled = quarterly_revenue(facts)
             res = analyze(rev, backfilled)
             row = {"代號": sym, "分類": label(res)}
             row.update(res or {})
+            if WITH_FINANCIALS and facts:
+                row.update(extract_financials(facts, rev))
+            if WITH_PRICE:
+                row.update(fetch_price_stooq(sym))
+                row.update(derive_valuation(row))         # 需股價+流通股數+財報,故最後算
         results.append(row)
         append_progress(row)
         print(f"[{i}/{len(todo)}] {sym:6s} {row['分類']:18s} "
               f"{sort_col} {row.get(sort_col,'-')}% 連續 {row.get('連續成長季數','-')}季")
         time.sleep(REQ_SLEEP)
 
-    df = pd.DataFrame(results)
-    if not df.empty:
+    full = pd.DataFrame(results)                           # 全欄位(含財報/股價),供第二分頁用
+    df = full
+    if not full.empty:
         for c in [sort_col, "連續成長季數"] + [f"{n}成長比率%" for _, n in WINDOWS_Q]:
-            if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-        df = df.sort_values([sort_col, "連續成長季數", avg_col],
-                            ascending=False, na_position="last")
-        # 各窗並列「成長比率%」與「增長季數(增/可比,例 30/40)」
+            if c in full.columns:
+                full[c] = pd.to_numeric(full[c], errors="coerce")
+        full = full.sort_values([sort_col, "連續成長季數", avg_col],
+                                ascending=False, na_position="last")
+        # 第一頁:各窗並列「成長比率%」與「增長季數(增/可比,例 30/40)」
         cols = (["代號", "分類"] + _win_fields()
                 + ["可比季數", "連續成長季數", "近4季樣態",
                    "最新季", "最新季年增%", avg_col, "Q4回填季數"])
-        df = df[[c for c in cols if c in df.columns]]
+        df = full[[c for c in cols if c in full.columns]]
 
     os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
     with pd.ExcelWriter(OUTPUT, engine="openpyxl") as xw:
         df.to_excel(xw, sheet_name="美股季營收年增掃描", index=False)
-    print(f"\n完成 → {OUTPUT}({len(df)} 檔)")
+        # 第二分頁:財報三表科目 + 股價估值(一檔一列,與第一頁同序)
+        if not df.empty and (WITH_FINANCIALS or WITH_PRICE):
+            fin_cols = (["代號", "分類"]
+                        + (PRICE_FIELDS if WITH_PRICE else [])
+                        + (FIN_FIELDS if WITH_FINANCIALS else []))
+            fdf = full[[c for c in fin_cols if c in full.columns]].copy()
+            for c in fdf.columns:
+                if c not in ("代號", "分類"):
+                    fdf[c] = pd.to_numeric(fdf[c], errors="coerce")
+            fdf.to_excel(xw, sheet_name="財報與股價", index=False)
+    print(f"\n完成 → {OUTPUT}({len(df)} 檔)"
+          + (";另含『財報與股價』分頁" if (WITH_FINANCIALS or WITH_PRICE) else ""))
     if not df.empty and "分類" in df.columns:
         print(df["分類"].value_counts().to_string())
 

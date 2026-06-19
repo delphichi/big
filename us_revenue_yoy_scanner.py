@@ -246,15 +246,16 @@ def quarterly_revenue(facts):
 
 # ---------- 財報三表(同一份 companyfacts,不額外打 SEC)----------
 def _latest_value(ns, concepts, unit="USD", instant=False):
-    """取某概念清單的最新值。
-    - instant=True:資產負債表(時點值,無 start)取最新 end。
-    - instant=False:損益/現金流(期間值)取最新『年度』(~365 天)。
-    概念依清單優先序:第一個有資料的就採用(補不同公司/年份的標籤差異)。"""
-    for c in concepts:
+    """取某概念清單的『全清單最新值』(主要給資產負債表時點值/股數用)。
+    - instant=True:時點值(無 start),取最新 end。
+    - instant=False:期間值,取最新『年度』(~365 天)。
+    跨所有同義概念一起比,取 end 最新者;同期再以概念優先序、申報日決定
+    (避免只看第一個概念而拿到舊年度的值)。"""
+    best, best_key = None, None
+    for ci, c in enumerate(concepts):
         node = ns.get(c)
         if not node:
             continue
-        best, rank = None, None
         for u, items in node.get("units", {}).items():
             if u != unit:
                 continue
@@ -275,24 +276,57 @@ def _latest_value(ns, concepts, unit="USD", instant=False):
                         continue
                     if not (Y_MIN_DAYS <= days <= Y_MAX_DAYS):
                         continue
-                rk = (e, filed)
-                if rank is None or rk > rank:
-                    rank, best = rk, float(v)
-        if best is not None:
-            return best
-    return None
+                key = (e, -ci, filed)                        # 最新 end 優先;同期用概念序、申報日
+                if best_key is None or key > best_key:
+                    best_key, best = key, float(v)
+    return best
+
+def _annual_by_fy(ns, concepts, unit="USD"):
+    """回傳 {會計年度 fy: 值}(年度期間值)。同年取概念優先序高、申報最新者。
+    用來把損益表各科目對齊『同一個會計年度』,避免比率口徑不一(毛利率/淨利率 >100%)。"""
+    out = {}                                                # fy -> (key, val)
+    for ci, c in enumerate(concepts):
+        node = ns.get(c)
+        if not node:
+            continue
+        for u, items in node.get("units", {}).items():
+            if u != unit:
+                continue
+            for it in items:
+                v, e, s, fy = it.get("val"), it.get("end"), it.get("start"), it.get("fy")
+                filed = it.get("filed", "")
+                if v is None or not e or not s or fy is None:
+                    continue
+                try:
+                    days = (_parse_d(e) - _parse_d(s)).days
+                except Exception:
+                    continue
+                if not (Y_MIN_DAYS <= days <= Y_MAX_DAYS):
+                    continue
+                fy = int(fy); key = (e, -ci, filed)
+                if fy not in out or key > out[fy][0]:
+                    out[fy] = (key, float(v))
+    return {fy: val for fy, (key, val) in out.items()}
 
 def extract_financials(facts, rev):
     """從 companyfacts 抽損益表/資產負債表/現金流量表關鍵科目,並算經營績效比率。
     金額一律換成『百萬美元』。取最新年度(期間值)與最新時點(資產負債)。"""
     f = (facts or {}).get("facts", {})
     usg, dei = f.get("us-gaap", {}), f.get("dei", {})
-    # 損益表(年度)
-    rev_y = _latest_value(usg, REV_CONCEPTS)
-    gp    = _latest_value(usg, ["GrossProfit"])
-    op    = _latest_value(usg, ["OperatingIncomeLoss"])
-    ni    = _latest_value(usg, ["NetIncomeLoss", "ProfitLoss"])
-    eps   = _latest_value(usg, ["EarningsPerShareDiluted", "EarningsPerShareBasic"], unit="USD/shares")
+    # 損益表 + 現金流(年度):全部對齊『同一個最新會計年度』,確保比率口徑一致
+    rev_by = _annual_by_fy(usg, REV_CONCEPTS)
+    ni_by  = _annual_by_fy(usg, ["NetIncomeLoss", "ProfitLoss"])
+    target_fy = max(rev_by) if rev_by else (max(ni_by) if ni_by else None)
+    at = (lambda by: by.get(target_fy)) if target_fy is not None else (lambda by: None)
+    rev_y = at(rev_by)
+    gp    = at(_annual_by_fy(usg, ["GrossProfit"]))
+    op    = at(_annual_by_fy(usg, ["OperatingIncomeLoss"]))
+    ni    = at(ni_by)
+    eps   = at(_annual_by_fy(usg, ["EarningsPerShareDiluted", "EarningsPerShareBasic"], unit="USD/shares"))
+    ocf   = at(_annual_by_fy(usg, ["NetCashProvidedByUsedInOperatingActivities",
+                                   "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"]))
+    capex = at(_annual_by_fy(usg, ["PaymentsToAcquirePropertyPlantAndEquipment",
+                                   "PaymentsForCapitalImprovements"]))
     # 資產負債表(時點)
     assets = _latest_value(usg, ["Assets"], instant=True)
     liab   = _latest_value(usg, ["Liabilities"], instant=True)
@@ -304,11 +338,6 @@ def extract_financials(facts, rev):
                                  "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"], instant=True)
     ltd    = _latest_value(usg, ["LongTermDebtNoncurrent", "LongTermDebt"], instant=True) or 0
     std    = _latest_value(usg, ["LongTermDebtCurrent", "DebtCurrent"], instant=True) or 0
-    # 現金流量表(年度)
-    ocf    = _latest_value(usg, ["NetCashProvidedByUsedInOperatingActivities",
-                                 "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"])
-    capex  = _latest_value(usg, ["PaymentsToAcquirePropertyPlantAndEquipment",
-                                 "PaymentsForCapitalImprovements"])
     # 流通股數:優先 dei(時點),退回 us-gaap
     shares = (_latest_value(dei, ["EntityCommonStockSharesOutstanding"], unit="shares", instant=True)
               or _latest_value(usg, ["CommonStockSharesOutstanding"], unit="shares", instant=True))
@@ -324,6 +353,7 @@ def extract_financials(facts, rev):
     fcf = (ocf - capex) if (ocf is not None and capex is not None) else None
     total_debt = (ltd or 0) + (std or 0)
     return {
+        "財報年度": target_fy,
         "營收TTM(百萬)": M(rev_ttm), "營收_年(百萬)": M(rev_y),
         "毛利率%": pct(gp, rev_y), "營益率%": pct(op, rev_y), "淨利率%": pct(ni, rev_y),
         "EPS_年": round(eps, 2) if eps is not None else None,
@@ -493,7 +523,7 @@ def _win_fields():
 # 「財報與股價」分頁欄位(股價/估值在前,財報三表科目與比率在後)
 PRICE_FIELDS = ["股價", "市值(十億美元)", "本益比PE", "股價淨值比PB", "股價營收比PS",
                 "距52週高%", "近1年報酬%", "52週高", "52週低"]
-FIN_FIELDS   = ["營收TTM(百萬)", "營收_年(百萬)", "毛利率%", "營益率%", "淨利率%", "EPS_年",
+FIN_FIELDS   = ["財報年度", "營收TTM(百萬)", "營收_年(百萬)", "毛利率%", "營益率%", "淨利率%", "EPS_年",
                 "ROE%", "ROA%", "負債比%", "流動比%", "獲利含金量",
                 "營業現金流(百萬)", "自由現金流(百萬)", "總資產(百萬)", "總負債(百萬)",
                 "股東權益(百萬)", "現金(百萬)", "負債權益比", "流通股數(百萬)"]

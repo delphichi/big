@@ -338,13 +338,34 @@ def extract_financials(facts, rev):
 
 
 # ---------- 股價(Stooq,免金鑰)+ 估值 ----------
+# 斷路器:股價來源若被網路政策擋,逐檔 timeout 會拖垮整個掃描(數百檔就吃掉 CI 時限)。
+# 連續多檔『連線層級失敗』就自動停抓股價,只輸出財報(優雅降級,不犧牲吞吐)。
+PRICE_FAIL_LIMIT = 8
+_price_state = {"off": False, "fails": 0}
+
 def fetch_price_stooq(sym):
-    """抓日線 CSV,算最新收盤/52週高低/距高/近1年報酬。被擋或查無 → 回 {}。"""
+    """抓日線 CSV,算最新收盤/52週高低/距高/近1年報酬。
+    連線失敗會累計;達 PRICE_FAIL_LIMIT 後本次起停抓(斷路器)。被擋或查無 → 回 {}。"""
+    if _price_state["off"]:
+        return {}
     s = sym.lower().replace(".", "-")
     try:
-        r = requests.get(f"https://stooq.com/q/d/l/?s={s}.us&i=d", timeout=20)
-        if r.status_code != 200 or not r.text.startswith("Date"):
-            return {}
+        r = requests.get(f"https://stooq.com/q/d/l/?s={s}.us&i=d", timeout=10)
+    except Exception:
+        _price_state["fails"] += 1
+        if _price_state["fails"] >= PRICE_FAIL_LIMIT:
+            _price_state["off"] = True
+            print(f"  ⚠ 連續 {PRICE_FAIL_LIMIT} 檔抓不到股價(Stooq 疑被網路政策擋),"
+                  f"本次起停止抓股價,只輸出財報。如需股價請在環境網路政策放行 stooq.com,"
+                  f"或設 WITH_PRICE=False 關閉。")
+        return {}
+    if r.status_code != 200:
+        _price_state["fails"] += 1
+        return {}
+    _price_state["fails"] = 0                              # 連到了就重置斷路器
+    if not r.text.startswith("Date"):
+        return {}                                          # 200 但查無此檔(下市/代號異動),不計入斷路
+    try:
         df = pd.read_csv(io.StringIO(r.text))
         c = pd.to_numeric(df.get("Close"), errors="coerce").dropna()
         if c.empty:

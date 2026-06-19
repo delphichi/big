@@ -180,6 +180,50 @@ def yearly(perf):
     return yd
 
 
+# ---------- 相對歷史水位(現值 vs 5年均 vs 位階)----------
+def _ttm_series(perf):
+    """逐季滾動 TTM 三率與 ROE(近四季加總,口徑一致),供算歷史分布。"""
+    rows = []
+    for i in range(3, len(perf)):
+        win = perf.iloc[i - 3:i + 1]
+        rev = win["營收(億)"].sum() * 1e8
+        if not rev or pd.isna(rev):
+            continue
+        ni = win["_淨利"].sum()
+        eq = win["_權益"].dropna()
+        rows.append({
+            "gm": win["_毛利"].sum() / rev * 100,
+            "om": win["_營益"].sum() / rev * 100,
+            "nm": ni / rev * 100,
+            "roe": (ni / eq.iloc[-1] * 100) if (len(eq) and eq.iloc[-1]) else None,
+        })
+    return rows
+
+def hist_levels(sid, name, perf, per_df):
+    """回傳一檔的『現值 / 5年均 / 位階%』。位階% = 目前值 ≤ 之歷史比例(0–100)。"""
+    out = {"代號": sid, "名稱": name}
+    def lvl(vals, cur, prefix, dec=1):
+        v = pd.Series([x for x in vals if x is not None and pd.notna(x)], dtype="float64")
+        if len(v) and cur is not None and pd.notna(cur):
+            out[f"{prefix}現"]   = round(float(cur), dec)
+            out[f"{prefix}5年均"] = round(float(v.mean()), dec)
+            out[f"{prefix}位階%"] = round(float((v <= cur).mean() * 100))
+    ttm = _ttm_series(perf)
+    for key, label in (("gm", "毛利率"), ("om", "營益率"), ("nm", "淨利率"), ("roe", "ROE")):
+        series = [r[key] for r in ttm]
+        cur = series[-1] if series else None
+        lvl(series, cur, label)
+    if per_df is not None and not per_df.empty:
+        p = per_df.sort_values("date")
+        for col, label, dec in (("PER", "PER", 2), ("PBR", "PBR", 2), ("dividend_yield", "殖利率", 2)):
+            s = pd.to_numeric(p.get(col), errors="coerce").dropna()
+            if label in ("PER", "PBR"):
+                s = s[s > 0]                                  # 濾掉虧損期的負/零 PER
+            if len(s):
+                lvl(list(s), float(s.iloc[-1]), label, dec)
+    return out
+
+
 # ---------- 跨檔比較(一檔一列)----------
 def summary_row(sid, name, raw):
     row = {"代號": sid, "名稱": name}
@@ -228,21 +272,22 @@ def summary_row(sid, name, raw):
         row["殖利率%"] = p.get("dividend_yield")
     # 成長:最新月營收年增
     row["最新月營收年增%"] = revenue_yoy(raw)
-    return row, perf, rev_year, eps_year
+    hist = hist_levels(sid, name, perf, raw.get("PER")) if not perf.empty else {"代號": sid, "名稱": name}
+    return row, perf, rev_year, eps_year, hist
 
 
 # ---------- 主流程 ----------
 def main():
     dl = make_loader()
-    rows, details = [], {}
+    rows, hists, details = [], [], {}
     rev_years, eps_years = {}, {}                      # {代號名稱: {年: 值}} 供逐年對照
     for i, (sid, name) in enumerate(PICKS, 1):
         print(f"[{i}/{len(PICKS)}] 抓取 {sid} {name} ...")
         for attempt in range(3):
             try:
                 raw = fetch_one(dl, sid, START_DATE)
-                row, perf, rev_y, eps_y = summary_row(sid, name, raw)
-                rows.append(row)
+                row, perf, rev_y, eps_y, hist = summary_row(sid, name, raw)
+                rows.append(row); hists.append(hist)
                 label = f"{sid} {name}"
                 if rev_y: rev_years[label] = rev_y
                 if eps_y: eps_years[label] = eps_y
@@ -256,6 +301,7 @@ def main():
                     time.sleep(60); continue
                 print(f"  ! {sid} 失敗:{e}")
                 rows.append({"代號": sid, "名稱": name})
+                hists.append({"代號": sid, "名稱": name})
                 break
         time.sleep(RATE_SLEEP)
 
@@ -279,9 +325,19 @@ def main():
         out = pd.DataFrame({lbl: pd.Series(v) for lbl, v in d.items()}).T
         return out.reindex(columns=years)
 
+    # 相對歷史水位(現值 / 5年均 / 位階%)
+    hdf = pd.DataFrame(hists)
+    hcols = ["代號", "名稱"]
+    for label in ("毛利率", "營益率", "淨利率", "ROE", "PER", "PBR", "殖利率"):
+        hcols += [f"{label}現", f"{label}5年均", f"{label}位階%"]
+    hdf = hdf[[c for c in hcols if c in hdf.columns]]
+    if "代號" in df.columns and "代號" in hdf.columns:        # 與主表同序,方便對照
+        hdf = hdf.set_index("代號").reindex(df["代號"]).reset_index()
+
     os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
     with pd.ExcelWriter(OUTPUT, engine="openpyxl") as xw:
         df.to_excel(xw, sheet_name="財報估值比較", index=False)
+        hdf.to_excel(xw, sheet_name="相對歷史水位", index=False)
         ry, ey = pivot_years(rev_years), pivot_years(eps_years)
         if not ry.empty: ry.to_excel(xw, sheet_name="逐年營收(億)")
         if not ey.empty: ey.to_excel(xw, sheet_name="逐年EPS")

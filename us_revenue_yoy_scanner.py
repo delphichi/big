@@ -84,6 +84,20 @@ REV_CONCEPTS = [
     "SalesRevenueNet",
 ]
 
+# 營業現金流 / 資本支出(capex)概念(各家標籤不一,廣納以提高自由現金流覆蓋率)
+OCF_CONCEPTS = [
+    "NetCashProvidedByUsedInOperatingActivities",
+    "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+]
+CAPEX_CONCEPTS = [
+    "PaymentsToAcquirePropertyPlantAndEquipment",
+    "PaymentsToAcquireProductiveAssets",                 # AMZN 等用此標籤
+    "PaymentsForCapitalImprovements",
+    "PaymentsToAcquireOtherPropertyPlantAndEquipment",
+    "PaymentsToAcquireMachineryAndEquipment",
+    "PaymentsToAcquireProductiveAssetsNet",
+]
+
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 FACTS_URL       = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
 
@@ -316,17 +330,22 @@ def extract_financials(facts, rev):
     # 損益表 + 現金流(年度):全部對齊『同一個最新會計年度』,確保比率口徑一致
     rev_by = _annual_by_fy(usg, REV_CONCEPTS)
     ni_by  = _annual_by_fy(usg, ["NetIncomeLoss", "ProfitLoss"])
-    target_fy = max(rev_by) if rev_by else (max(ni_by) if ni_by else None)
-    at = (lambda by: by.get(target_fy)) if target_fy is not None else (lambda by: None)
-    rev_y = at(rev_by)
-    gp    = at(_annual_by_fy(usg, ["GrossProfit"]))
-    op    = at(_annual_by_fy(usg, ["OperatingIncomeLoss"]))
-    ni    = at(ni_by)
-    eps   = at(_annual_by_fy(usg, ["EarningsPerShareDiluted", "EarningsPerShareBasic"], unit="USD/shares"))
-    ocf   = at(_annual_by_fy(usg, ["NetCashProvidedByUsedInOperatingActivities",
-                                   "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"]))
-    capex = at(_annual_by_fy(usg, ["PaymentsToAcquirePropertyPlantAndEquipment",
-                                   "PaymentsForCapitalImprovements"]))
+    inc_fy = max(rev_by) if rev_by else (max(ni_by) if ni_by else None)
+    inc = (lambda by: by.get(inc_fy)) if inc_fy is not None else (lambda by: None)
+    rev_y = inc(rev_by)
+    gp    = inc(_annual_by_fy(usg, ["GrossProfit"]))
+    op    = inc(_annual_by_fy(usg, ["OperatingIncomeLoss"]))
+    ni    = inc(ni_by)
+    eps   = inc(_annual_by_fy(usg, ["EarningsPerShareDiluted", "EarningsPerShareBasic"], unit="USD/shares"))
+    # 現金流量表:用『現金流自己的最新年度』(與營收年度可能差一期),
+    # 並讓 OCF 與 capex 取同一年 → 自由現金流口徑一致、覆蓋率更高
+    ocf_by   = _annual_by_fy(usg, OCF_CONCEPTS)
+    capex_by = _annual_by_fy(usg, CAPEX_CONCEPTS)
+    cf_fy = max(ocf_by) if ocf_by else None
+    ocf   = ocf_by.get(cf_fy) if cf_fy is not None else None
+    capex = capex_by.get(cf_fy)                          # 同年 capex
+    if capex is None and capex_by:                       # 該年缺則退取 capex 最新年(盡力估 FCF)
+        capex = capex_by[max(capex_by)]
     # 資產負債表(時點)
     assets = _latest_value(usg, ["Assets"], instant=True)
     liab   = _latest_value(usg, ["Liabilities"], instant=True)
@@ -353,7 +372,7 @@ def extract_financials(facts, rev):
     fcf = (ocf - capex) if (ocf is not None and capex is not None) else None
     total_debt = (ltd or 0) + (std or 0)
     return {
-        "財報年度": target_fy,
+        "財報年度": inc_fy,
         "營收TTM(百萬)": M(rev_ttm), "營收_年(百萬)": M(rev_y),
         "毛利率%": pct(gp, rev_y), "營益率%": pct(op, rev_y), "淨利率%": pct(ni, rev_y),
         "EPS_年": round(eps, 2) if eps is not None else None,

@@ -92,6 +92,22 @@ def pick(piv, *names):
             return piv[n]
     return pd.Series(index=piv.index, dtype="float64")
 
+def decum(s):
+    """台股『現金流量表』是 YTD 累計(Q2=半年、Q3=前三季、Q4=全年);
+    轉成單季:同一年『本期 − 上一期』,每年首季維持原值。損益表已是單季,不需處理。"""
+    if s is None or len(s) == 0:
+        return s
+    s = s.sort_index()
+    out, prev_y, prev_v = {}, None, None
+    for d, v in s.items():
+        y = str(d)[:4]
+        if pd.isna(v):
+            out[d] = v
+            continue
+        out[d] = (v - prev_v) if (y == prev_y and prev_v is not None) else v
+        prev_y, prev_v = y, v
+    return pd.Series(out)
+
 
 # ---------- 逐季經營績效 ----------
 def performance(raw):
@@ -111,12 +127,13 @@ def performance(raw):
     ca   = pick(bal, "CurrentAssets")
     cl   = pick(bal, "CurrentLiabilities")
 
-    ocf  = pick(cf, "CashFlowsFromOperatingActivities",
-                    "NetCashFlowsFromOperatingActivities",
-                    "CashProvidedByOperatingActivities")
-    capex = pick(cf, "PropertyAndPlantAndEquipment",
-                     "AcquisitionOfPropertyPlantAndEquipment",
-                     "PaymentsToAcquirePropertyPlantAndEquipment")
+    # 現金流量表為 YTD 累計 → 先轉單季,之後加總近四季才正確
+    ocf  = decum(pick(cf, "CashFlowsFromOperatingActivities",
+                          "NetCashFlowsFromOperatingActivities",
+                          "CashProvidedByOperatingActivities"))
+    capex = decum(pick(cf, "PropertyAndPlantAndEquipment",
+                          "AcquisitionOfPropertyPlantAndEquipment",
+                          "PaymentsToAcquirePropertyPlantAndEquipment"))
 
     m = pd.DataFrame(index=inc.index)
     m["營收(億)"]   = (rev / 1e8).round(1)

@@ -3,7 +3,8 @@
 美股季營收年增掃描器 (US Quarterly-Revenue YoY Scanner)
 ========================================================
 為什麼是「季」不是「月」:美股公司只公布季度財報(無台灣那種法定月營收),
-所以這支看「最近 3 年(12 季)每一季營收,是否較去年同期成長」。
+所以這支看「最近 10 年(40 季)每一季營收,是否較去年同期成長」,
+並同時並列近10年/近5年/近3年/近1年四個窗的成長比率(看長期 vs 近期)。
 
 資料來源:SEC EDGAR 官方 XBRL API(免費、免金鑰、歷史完整)。
   - companyfacts:一次抓一檔全部財報概念,從中取營收(us-gaap)。
@@ -16,11 +17,12 @@
 輸出:data/美股季營收年增掃描.xlsx
 
 每檔算出:
-  - 近12季成長比率% / 成長季數 / 可比基數
-  - 連續成長季數(從最新季往回,連幾季 YoY 正)
-  - 近4季成長、近4季樣態(✔/✗)
-  - 最新季、最新季年增%、近12季平均年增%
+  - 近10年/近5年/近3年/近1年 成長比率%(各窗:YoY 為正的季數 ÷ 該窗實際季數)
+  - 近10年/近5年/近3年/近1年 增長季數(計數形式,例 30/40 = 40 季裡有 30 季較去年同期成長)
+  - 可比季數、連續成長季數(從最新季往回,連幾季 YoY 正)
+  - 近4季樣態(✔/✗)、最新季、最新季年增%、近10年平均年增%
   - 分類:🟢全期強勢 / 🔵多數成長 / 🟡中性 / 🔴轉弱衰退 / —資料不足
+    (分類預設用近3年窗,見 CLASS_WINDOW_Q)
 
 ★★ 使用前務必做兩件事 ★★
   1. 把 USER_AGENT 改成「你的名字 你的email」——SEC 規定每個請求都要帶可辨識的
@@ -40,7 +42,9 @@ import numpy as np
 from datetime import datetime
 
 # ---------- 設定 ----------
-USER_AGENT = "ChangeMe yourname your_email@example.com"   # ★ 必改:SEC 要求帶聯絡資訊
+# SEC 規定每個請求都要帶可辨識的 User-Agent(含聯絡 email),否則會被擋(403)。
+# 優先讀環境變數 SEC_USER_AGENT(GitHub Actions 用 secret 帶入);本機跑可直接改下方預設值。
+USER_AGENT = os.environ.get("SEC_USER_AGENT", "").strip() or "ChangeMe yourname your_email@example.com"
 OUTPUT     = "data/美股季營收年增掃描.xlsx"
 PROGRESS   = "data/_us_revenue_scan_progress.csv"
 CIK_CACHE  = "data/_sec_cik_map.json"
@@ -48,11 +52,15 @@ CIK_CACHE  = "data/_sec_cik_map.json"
 TICKER_FILE_TXT = "tickers_us.txt"
 TICKER_FILE_CSV = "tickers_us.csv"
 
-YEARS      = 3
-LOOKBACK_Q = YEARS * 4            # 12 季
+YEARS      = 10
+LOOKBACK_Q = YEARS * 4            # 40 季(近10年)
 REQ_SLEEP  = 0.2                  # 每檔間隔秒(SEC 上限約 10/秒,取 5/秒禮貌值)
 MAX_RETRY  = 4
 RESUME     = True
+
+# 多窗成長比率(季數, 欄名):同時看長期與近期,避免被單一窗誤導
+WINDOWS_Q     = [(40, "近10年"), (20, "近5年"), (12, "近3年"), (4, "近1年")]
+CLASS_WINDOW_Q = 12               # 🟢🔵🟡🔴 分類用哪個窗(季)。預設近3年(12 季)
 
 # 內建清單(沒有 tickers_us.txt / .csv 時才用)
 US_TICKERS = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL"]
@@ -239,12 +247,31 @@ def analyze(rev, backfilled=frozenset(), lookback=LOOKBACK_Q):
 
     recent = rows[-lookback:]
     n_base = len(recent)
-    n_grow = sum(1 for r in recent if r[3] > 0)
     n_bf   = sum(1 for r in recent if (r[0], r[1]) in backfilled)
 
+    latest = rows[-1]
+    out = {
+        "最新季":      f"{latest[0]}Q{latest[1]}",
+        "最新季年增%": round(latest[3], 1),
+        "可比季數":    n_base,
+    }
+    # 多窗成長比率(各窗:該窗內 YoY 為正的季數 ÷ 該窗實際季數)
+    # 同時輸出「增長季數/可比季數」計數形式(例:30/40),一眼看出 40 季裡有 30 季較去年同期增長。
+    class_ratio, class_base = None, 0
+    for w, name in WINDOWS_Q:
+        seg = rows[-w:]
+        if seg:
+            up = sum(1 for r in seg if r[3] > 0)        # 該窗 YoY 為正(增長)的季數
+            total = len(seg)                            # 該窗實際可比季數
+            ratio = round(up / total * 100, 1)
+            out[f"{name}成長比率%"] = ratio
+            out[f"{name}增長季數"] = f"{up}/{total}"     # 計數形式:增長季數/可比季數
+            if w == CLASS_WINDOW_Q:
+                class_ratio, class_base = ratio, total
+    out["_class_ratio"], out["_class_base"] = class_ratio, class_base
+
     last4 = rows[-4:]
-    g4 = sum(1 for r in last4 if r[3] > 0)
-    pat4 = "".join("✔" if r[3] > 0 else "✗" for r in last4)
+    out["近4季樣態"] = "".join("✔" if r[3] > 0 else "✗" for r in last4)
 
     streak = 0
     for r in reversed(rows):
@@ -252,25 +279,17 @@ def analyze(rev, backfilled=frozenset(), lookback=LOOKBACK_Q):
             streak += 1
         else:
             break
-
-    latest = rows[-1]
-    return {
-        "最新季":           f"{latest[0]}Q{latest[1]}",
-        "最新季年增%":      round(latest[3], 1),
-        "近12季可比基數":    n_base,
-        "近12季成長季數":    n_grow,
-        "近12季成長比率%":  round(n_grow / n_base * 100, 1) if n_base else None,
-        "近4季成長":        f"{g4}/{len(last4)}",
-        "近4季樣態":        pat4,
-        "連續成長季數":      streak,
-        "近12季平均年增%":  round(float(np.mean([r[3] for r in recent])), 1),
-        "Q4回填季數":       n_bf,
-    }
+    out["連續成長季數"] = streak
+    out[f"近{lookback//4}年平均年增%"] = round(float(np.mean([r[3] for r in recent])), 1)
+    out["Q4回填季數"] = n_bf
+    return out
 
 def label(res):
-    if not res or res["近12季可比基數"] < RULES["min_base"]:
+    if not res or res.get("_class_base", 0) < RULES["min_base"]:
         return "— 資料不足/新上市"
-    ratio = res["近12季成長比率%"]
+    ratio = res.get("_class_ratio")
+    if ratio is None:
+        return "— 資料不足/新上市"
     if ratio >= RULES["strong_ratio"]:
         return "🟢 全期強勢"
     if ratio >= RULES["good_ratio"]:
@@ -293,9 +312,15 @@ def load_done():
     return {}
 
 # 進度/輸出共用的固定欄位(各列 key 不一,需固定表頭避免欄位錯位)
-PROG_FIELDS = ["代號", "分類", "最新季", "最新季年增%", "近12季可比基數", "近12季成長季數",
-               "近12季成長比率%", "近4季成長", "近4季樣態", "連續成長季數",
-               "近12季平均年增%", "Q4回填季數"]
+def _win_fields():
+    out = []
+    for _, n in WINDOWS_Q:                              # 近10年/5年/3年/1年
+        out += [f"{n}成長比率%", f"{n}增長季數"]
+    return out
+
+PROG_FIELDS = (["代號", "分類", "最新季", "最新季年增%", "可比季數"]
+               + _win_fields()
+               + ["近4季樣態", "連續成長季數", f"近{YEARS}年平均年增%", "Q4回填季數"])
 
 def append_progress(row):
     os.makedirs(os.path.dirname(PROGRESS), exist_ok=True)
@@ -310,8 +335,10 @@ def append_progress(row):
 # ---------- 主流程 ----------
 def main():
     if "your_email@example.com" in USER_AGENT or USER_AGENT.startswith("ChangeMe"):
-        print("⚠ 請先把程式最上方的 USER_AGENT 改成『你的名字 你的email』,"
-              "否則 SEC 會擋(403)。改完再執行。")
+        print("⚠ 未設定 SEC User-Agent。SEC 要求帶『你的名字 你的email』,否則會擋(403)。\n"
+              "  GitHub Actions:repo → Settings → Secrets and variables → Actions → "
+              "新增 secret『SEC_USER_AGENT』,值填「你的名字 你的email」。\n"
+              "  本機執行:設環境變數 SEC_USER_AGENT,或直接改程式最上方的 USER_AGENT 預設值。")
         sys.exit(1)
 
     tickers = load_tickers()
@@ -320,6 +347,9 @@ def main():
     results = list(done.values())
     todo    = [t for t in tickers if t not in done]
     print(f"總清單 {len(tickers)} 檔,待掃 {len(todo)} 檔\n")
+
+    sort_col = f"{dict(WINDOWS_Q).get(CLASS_WINDOW_Q,'近3年')}成長比率%"
+    avg_col  = f"近{YEARS}年平均年增%"
 
     for i, sym in enumerate(todo, 1):
         # SEC 對照表的 class 股用連字號(BRK-B),watchlist 常用點(BRK.B),兩種都試
@@ -334,19 +364,20 @@ def main():
         results.append(row)
         append_progress(row)
         print(f"[{i}/{len(todo)}] {sym:6s} {row['分類']:18s} "
-              f"成長比率 {row.get('近12季成長比率%','-')}% 連續 {row.get('連續成長季數','-')}季")
+              f"{sort_col} {row.get(sort_col,'-')}% 連續 {row.get('連續成長季數','-')}季")
         time.sleep(REQ_SLEEP)
 
     df = pd.DataFrame(results)
     if not df.empty:
-        for c in ("近12季成長比率%", "連續成長季數", "近12季成長季數"):
+        for c in [sort_col, "連續成長季數"] + [f"{n}成長比率%" for _, n in WINDOWS_Q]:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
-        df = df.sort_values(["近12季成長比率%", "連續成長季數", "近12季平均年增%"],
+        df = df.sort_values([sort_col, "連續成長季數", avg_col],
                             ascending=False, na_position="last")
-        cols = ["代號", "分類", "近12季成長比率%", "近12季成長季數", "近12季可比基數",
-                "連續成長季數", "近4季成長", "近4季樣態",
-                "最新季", "最新季年增%", "近12季平均年增%", "Q4回填季數"]
+        # 各窗並列「成長比率%」與「增長季數(增/可比,例 30/40)」
+        cols = (["代號", "分類"] + _win_fields()
+                + ["可比季數", "連續成長季數", "近4季樣態",
+                   "最新季", "最新季年增%", avg_col, "Q4回填季數"])
         df = df[[c for c in cols if c in df.columns]]
 
     os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)

@@ -317,7 +317,10 @@ def _annual_by_fy(ns, concepts, unit="USD"):
                     continue
                 if not (Y_MIN_DAYS <= days <= Y_MAX_DAYS):
                     continue
-                fy = int(fy); key = (e, -ci, filed)
+                fy = int(fy)
+                if not (1990 <= fy <= 2100):                 # 濾掉異常 fy(資料錯誤),避免被當最新年
+                    continue
+                key = (e, -ci, filed)
                 if fy not in out or key > out[fy][0]:
                     out[fy] = (key, float(v))
     return {fy: val for fy, (key, val) in out.items()}
@@ -343,9 +346,9 @@ def extract_financials(facts, rev):
     capex_by = _annual_by_fy(usg, CAPEX_CONCEPTS)
     cf_fy = max(ocf_by) if ocf_by else None
     ocf   = ocf_by.get(cf_fy) if cf_fy is not None else None
-    capex = capex_by.get(cf_fy)                          # 同年 capex
-    if capex is None and capex_by:                       # 該年缺則退取 capex 最新年(盡力估 FCF)
-        capex = capex_by[max(capex_by)]
+    capex = capex_by.get(cf_fy)                          # 只取與 OCF 同年的 capex(避免跨年口徑錯亂)
+    if capex is not None:
+        capex = abs(capex)                              # 統一為支出正值(部分公司記負數)
     # 資產負債表(時點)
     assets = _latest_value(usg, ["Assets"], instant=True)
     liab   = _latest_value(usg, ["Liabilities"], instant=True)
@@ -369,12 +372,19 @@ def extract_financials(facts, rev):
 
     M   = lambda x: round(x / 1e6, 1) if x is not None else None        # → 百萬
     pct = lambda n, d: round(n / d * 100, 2) if (n is not None and d) else None
+    gm, om, nm = pct(gp, rev_y), pct(op, rev_y), pct(ni, rev_y)
+    # 銀行/保險/REIT 等「營收」XBRL 標籤不適用,常使分母過小、比率爆表(>100%)。
+    # 不合理就整組清空,避免誤導(其 ROE/ROA/資產負債/現金流仍照常輸出)。
+    if (gm is not None and (gm > 100 or gm < 0)) or \
+       (nm is not None and abs(nm) > 100) or \
+       (om is not None and abs(om) > 120):
+        gm = om = nm = None
     fcf = (ocf - capex) if (ocf is not None and capex is not None) else None
     total_debt = (ltd or 0) + (std or 0)
     return {
         "財報年度": inc_fy,
         "營收TTM(百萬)": M(rev_ttm), "營收_年(百萬)": M(rev_y),
-        "毛利率%": pct(gp, rev_y), "營益率%": pct(op, rev_y), "淨利率%": pct(ni, rev_y),
+        "毛利率%": gm, "營益率%": om, "淨利率%": nm,
         "EPS_年": round(eps, 2) if eps is not None else None,
         "ROE%": pct(ni, eq), "ROA%": pct(ni, assets),
         "負債比%": pct(liab, assets),

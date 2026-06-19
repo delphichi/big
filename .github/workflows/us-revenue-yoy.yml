@@ -1,0 +1,65 @@
+name: 美股季營收年增掃描
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每月 5 號 12:00 UTC 跑(美股季報陸續入 SEC,月跑可滾動納入最新財報)
+    - cron: "0 12 5 * *"
+
+permissions:
+  contents: write
+
+jobs:
+  us-revenue-yoy:
+    runs-on: ubuntu-latest
+    # SEC 約 10 請求/秒、無每小時額度;掃幾百~上千檔通常數分鐘。給 60 分鐘充裕緩衝
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas numpy openpyxl
+
+      - name: Run US revenue YoY scanner
+        env:
+          # repo → Settings → Secrets and variables → Actions 新增 SEC_USER_AGENT
+          # 值填「你的名字 你的email」,SEC 強制要求,否則回 403
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: python us_revenue_yoy_scanner.py
+
+      # ── artifact(upload-artifact v6,Node24 原生)──
+      - name: Upload Excel as artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: us-revenue-yoy
+          path: data/美股季營收年增掃描.xlsx
+          if-no-files-found: error
+          retention-days: 90
+
+      # ── 在 data/ 留帶日期快照並 commit(含 CIK 快取、progress,加速下次)──
+      - name: Commit output to repo
+        if: always()
+        run: |
+          STAMP=$(date -u +%Y%m%d)
+          if [ -f "data/美股季營收年增掃描.xlsx" ]; then
+            cp "data/美股季營收年增掃描.xlsx" "data/${STAMP}_美股季營收年增掃描.xlsx"
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ || true
+          if git diff --staged --quiet; then
+            echo "沒有新檔案,略過 commit"
+          else
+            git commit -m "data: 美股季營收年增掃描 ${STAMP}"
+            git push
+          fi

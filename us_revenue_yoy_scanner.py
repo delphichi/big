@@ -40,7 +40,7 @@ import numpy as np
 from datetime import datetime
 
 # ---------- 設定 ----------
-USER_AGENT = "ChangeMe delphichi delphichi@gmail.com"   # ★ 必改:SEC 要求帶聯絡資訊
+USER_AGENT = "delphichi delphichi@gmail.com"   # ★ 必改:SEC 要求帶聯絡資訊
 OUTPUT     = "data/美股季營收年增掃描.xlsx"
 PROGRESS   = "data/_us_revenue_scan_progress.csv"
 CIK_CACHE  = "data/_sec_cik_map.json"

@@ -40,7 +40,7 @@ import numpy as np
 from datetime import datetime
 
 # ---------- 設定 ----------
-USER_AGENT = "delphichi delphichi@gmail.com"   # ★ 必改:SEC 要求帶聯絡資訊
+USER_AGENT = "ChangeMe yourname your_email@example.com"   # ★ 必改:SEC 要求帶聯絡資訊
 OUTPUT     = "data/美股季營收年增掃描.xlsx"
 PROGRESS   = "data/_us_revenue_scan_progress.csv"
 CIK_CACHE  = "data/_sec_cik_map.json"
@@ -87,8 +87,9 @@ def _parse_txt(path):
         if not line:
             continue
         for tok in line.replace(",", " ").replace("\t", " ").split():
+            tok = re.sub(r"[^A-Z0-9.\-]", "", tok.strip().upper())  # 去掉黏進來的 } 等雜字元
             if tok:
-                out.append(tok.strip().upper())
+                out.append(tok)
     return out
 
 def _parse_csv(path):
@@ -321,7 +322,8 @@ def main():
     print(f"總清單 {len(tickers)} 檔,待掃 {len(todo)} 檔\n")
 
     for i, sym in enumerate(todo, 1):
-        cik = cikmap.get(sym.upper())
+        # SEC 對照表的 class 股用連字號(BRK-B),watchlist 常用點(BRK.B),兩種都試
+        cik = cikmap.get(sym.upper()) or cikmap.get(sym.upper().replace(".", "-"))
         if cik is None:
             row = {"代號": sym, "分類": "— 查無CIK(非SEC財報/ETF/ADR)"}
         else:

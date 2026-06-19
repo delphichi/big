@@ -2,16 +2,17 @@
 """
 月營收年增掃描器 (Monthly Revenue YoY Scanner)
 ================================================
-功能:給一份股票代號清單,逐檔檢查「最近 3 年(36 個月)每月營收,是否較去年同期成長」。
+功能:給一份股票代號清單,逐檔檢查「最近 10 年(120 個月)每月營收,是否較去年同期成長」,
+      並同時並列近10年/近5年/近3年/近1年四個窗的成長比率(看長期 vs 近期)。
 資料來源:FinMind  taiwan_stock_month_revenue(每檔只打 1 次 API,很輕量,適合大量掃描)。
-輸出   :data/月營收年增掃描.xlsx(單一摘要表,依成長一致性排序)。
+輸出   :data/月營收年增掃描.xlsx(摘要表;開啟明細模式時另含逐月年增%明細表)。
 
 每檔算出:
-  - 近36月成長月數 / 比較基數(有去年同期可比的月份)、成長比率%
-  - 近12月成長月數、近12月樣態(✔/✗ 視覺化)
-  - 連續成長月數(從最新月往回算,連幾個月 YoY 為正)
-  - 最新月份、最新月年增%、近36月平均年增%
+  - 近10年/近5年/近3年/近1年 成長比率%(各窗:YoY 為正的月數 ÷ 該窗實際月數)
+  - 可比月數、連續成長月數(從最新月往回算,連幾個月 YoY 為正)
+  - 近12月樣態(✔/✗ 視覺化)、最新月份、最新月年增%、近10年平均年增%
   - 分類:🟢全期強勢 / 🔵多數成長 / 🟡中性 / 🔴轉弱衰退 / —資料不足
+    (分類預設用近3年窗,見 CLASS_WINDOW)
 
 清單來源(三選一,優先序由上而下):
   1. SCAN_ALL_LISTED=True  → 自動抓所有上市櫃普通股(忽略下方清單)
@@ -39,17 +40,25 @@ TICKER_FILE_CSV = "tickers.csv"
 OUTPUT          = "data/月營收年增掃描.xlsx"
 PROGRESS        = "data/_revenue_scan_progress.csv"
 
-YEARS           = 3                           # 看最近幾年(每月)
-LOOKBACK        = YEARS * 12                   # 36 個月
+YEARS           = 10                          # 看最近幾年(每月)→ 10 年
+LOOKBACK        = YEARS * 12                   # 120 個月
 RATE_SLEEP      = 0.3                          # 每檔間隔秒數(降低撞限流機率)
 MAX_RETRY       = 4                            # 限流時重試次數
 RESUME          = True                         # 是否啟用斷點續跑
 
+# 多窗成長比率(月數, 欄名):同時看長期與近期,避免被單一窗誤導
+WINDOWS         = [(120, "近10年"), (60, "近5年"), (36, "近3年"), (12, "近1年")]
+CLASS_WINDOW    = 36                           # 🟢🔵🟡🔴 分類用哪個窗(月)。
+                                               # 預設近3年(門檻才有意義);要嚴格 10 年濾網
+                                               # 改成 120,並把下方 RULES 門檻調低
+WRITE_MONTHLY_DETAIL = False                   # True 則另輸出「每月營收+年增%」明細表
+                                               # ★ 僅適合小清單(如精選名單),全市場會爆量
+
 # 內建清單(沒有 tickers.txt / tickers.csv 時才用,可自行編輯)
 TICKERS = ["2330", "2454", "2412", "1560", "2912", "1476"]
 
-# 分類門檻
-RULES = dict(strong_ratio=80,   # 近36月成長比率 ≥ 此值 → 🟢全期強勢
+# 分類門檻(對應 CLASS_WINDOW;若改用 120 窗,建議 strong=65/good=50/weak=35)
+RULES = dict(strong_ratio=80,   # 成長比率 ≥ 此值 → 🟢全期強勢
              good_ratio=60,      #                ≥ 此值 → 🔵多數成長
              weak_ratio=40,      #                < 此值 → 🔴轉弱衰退
              min_base=12)        # 可比月份 < 此值 → 視為資料不足
@@ -147,7 +156,7 @@ def fetch_revenue(api, sid, start):
 
 
 # ---------- 分析 ----------
-def analyze(df, lookback=LOOKBACK):
+def analyze(df, lookback=LOOKBACK, want_detail=False):
     if df is None or df.empty:
         return None
     need = {"revenue", "revenue_year", "revenue_month"}
@@ -172,12 +181,24 @@ def analyze(df, lookback=LOOKBACK):
         return None
 
     recent = rows[-lookback:]
-    n_base = len(recent)
-    n_grow = sum(1 for r in recent if r[2] > 0)
+    out = {
+        "最新月份":   f"{rows[-1][0]//100}/{rows[-1][0]%100:02d}",
+        "最新月年增%": round(rows[-1][2], 1),
+        "可比月數":   len(recent),
+    }
+    # 多窗成長比率(各窗:該窗內 YoY 為正的月數 ÷ 該窗實際月數)
+    class_ratio, class_base = None, 0
+    for w, name in WINDOWS:
+        seg = rows[-w:]
+        if seg:
+            ratio = round(sum(1 for r in seg if r[2] > 0) / len(seg) * 100, 1)
+            out[f"{name}成長比率%"] = ratio
+            if w == CLASS_WINDOW:
+                class_ratio, class_base = ratio, len(seg)
+    out["_class_ratio"], out["_class_base"] = class_ratio, class_base
 
     last12 = rows[-12:]
-    g12 = sum(1 for r in last12 if r[2] > 0)
-    pat12 = "".join("✔" if r[2] > 0 else "✗" for r in last12)
+    out["近12月樣態"] = "".join("✔" if r[2] > 0 else "✗" for r in last12)
 
     streak = 0                       # 連續成長月數(從最新往回)
     for r in reversed(rows):
@@ -185,24 +206,20 @@ def analyze(df, lookback=LOOKBACK):
             streak += 1
         else:
             break
+    out["連續成長月數"] = streak
+    out[f"近{lookback//12}年平均年增%"] = round(float(np.mean([r[2] for r in recent])), 1)
 
-    latest = rows[-1]
-    return {
-        "最新月份":          f"{latest[0]//100}/{latest[0]%100:02d}",
-        "最新月年增%":       round(latest[2], 1),
-        "近36月可比基數":     n_base,
-        "近36月成長月數":     n_grow,
-        "近36月成長比率%":   round(n_grow / n_base * 100, 1) if n_base else None,
-        "近12月成長":        f"{g12}/{len(last12)}",
-        "近12月樣態":        pat12,
-        "連續成長月數":       streak,
-        "近36月平均年增%":   round(float(np.mean([r[2] for r in recent])), 1),
-    }
+    if want_detail:                  # 完整每月明細:(年月, 營收億, 年增%)
+        out["_detail"] = [(f"{ym//100}/{ym%100:02d}", round(rv/1e8, 2), round(yoy, 1))
+                          for ym, rv, yoy in recent]
+    return out
 
 def label(res):
-    if not res or res["近36月可比基數"] < RULES["min_base"]:
+    if not res or res.get("_class_base", 0) < RULES["min_base"]:
         return "— 資料不足/新上市"
-    ratio = res["近36月成長比率%"]
+    ratio = res.get("_class_ratio")
+    if ratio is None:
+        return "— 資料不足/新上市"
     if ratio >= RULES["strong_ratio"]:
         return "🟢 全期強勢"
     if ratio >= RULES["good_ratio"]:
@@ -247,7 +264,11 @@ def main():
     show_usage(api)
     print()
 
+    sort_col = f"{dict(WINDOWS).get(CLASS_WINDOW,'近3年')}成長比率%"
+    avg_col  = f"近{YEARS}年平均年增%"
+
     i = 0
+    details = []                          # 明細模式用:累積 (代號, 年月, 營收億, 年增%)
     while i < len(todo):
         sid = todo[i]
         try:
@@ -258,33 +279,40 @@ def main():
                   f"不跳過、不標記 {sid},醒來重抓。")
             time.sleep(wait)
             continue                      # 同一檔重試,i 不前進、不寫 progress
-        res = analyze(df)
+        res = analyze(df, want_detail=WRITE_MONTHLY_DETAIL)
         row = {"代號": sid, "分類": label(res)}
-        row.update(res or {})
+        if res:
+            if WRITE_MONTHLY_DETAIL and "_detail" in res:
+                for ym, rv, yoy in res["_detail"]:
+                    details.append({"代號": sid, "年月": ym, "營收(億)": rv, "年增%": yoy})
+            row.update({k: v for k, v in res.items() if not k.startswith("_")})
         results.append(row)
         append_progress(row)              # 只有「真的抓到/真的查無資料」才記錄完成
         i += 1
         print(f"[{i}/{len(todo)}] {sid:6s} {row['分類']:14s} "
-              f"成長比率 {row.get('近36月成長比率%','-')}% 連續 {row.get('連續成長月數','-')}月")
+              f"{sort_col} {row.get(sort_col,'-')}% 連續 {row.get('連續成長月數','-')}月")
         time.sleep(RATE_SLEEP)
 
-    # ---- 輸出 Excel(依成長一致性排序)----
+    # ---- 輸出 Excel(依分類窗的成長比率排序)----
     df = pd.DataFrame(results)
     if not df.empty:
-        for c in ("近36月成長比率%", "連續成長月數", "近36月成長月數"):
+        for c in [sort_col, "連續成長月數"] + [f"{n}成長比率%" for _, n in WINDOWS]:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
-        df = df.sort_values(["近36月成長比率%", "連續成長月數", "近36月平均年增%"],
-                            ascending=False, na_position="last")
-        cols = ["代號", "分類", "近36月成長比率%", "近36月成長月數", "近36月可比基數",
-                "連續成長月數", "近12月成長", "近12月樣態",
-                "最新月份", "最新月年增%", "近36月平均年增%"]
+        df = df.sort_values([sort_col, "連續成長月數"], ascending=False, na_position="last")
+        cols = (["代號", "分類"]
+                + [f"{n}成長比率%" for _, n in WINDOWS]          # 近10年/5年/3年/1年
+                + ["可比月數", "連續成長月數", "近12月樣態",
+                   "最新月份", "最新月年增%", avg_col])
         df = df[[c for c in cols if c in df.columns]]
 
     os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
     with pd.ExcelWriter(OUTPUT, engine="openpyxl") as xw:
         df.to_excel(xw, sheet_name="月營收年增掃描", index=False)
-    print(f"\n完成 → {OUTPUT}({len(df)} 檔)")
+        if WRITE_MONTHLY_DETAIL and details:
+            pd.DataFrame(details).to_excel(xw, sheet_name="每月營收年增明細", index=False)
+    print(f"\n完成 → {OUTPUT}({len(df)} 檔)"
+          + (f";另含 {len(details)} 列每月明細" if WRITE_MONTHLY_DETAIL and details else ""))
     if not df.empty and "分類" in df.columns:
         print(df["分類"].value_counts().to_string())
 

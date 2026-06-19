@@ -9,6 +9,7 @@
 
 每檔算出:
   - 近10年/近5年/近3年/近1年 成長比率%(各窗:YoY 為正的月數 ÷ 該窗實際月數)
+  - 近10年/近5年/近3年/近1年 增長月數(計數形式,例 80/120 = 120 個月裡有 80 個月較去年同期增長)
   - 可比月數、連續成長月數(從最新月往回算,連幾個月 YoY 為正)
   - 近12月樣態(✔/✗ 視覺化)、最新月份、最新月年增%、近10年平均年增%
   - 分類:🟢全期強勢 / 🔵多數成長 / 🟡中性 / 🔴轉弱衰退 / —資料不足
@@ -187,14 +188,18 @@ def analyze(df, lookback=LOOKBACK, want_detail=False):
         "可比月數":   len(recent),
     }
     # 多窗成長比率(各窗:該窗內 YoY 為正的月數 ÷ 該窗實際月數)
+    # 同時輸出「增長月數/可比月數」的計數形式(例:80/120),一眼看出 80 個月增長、共 120 個月。
     class_ratio, class_base = None, 0
     for w, name in WINDOWS:
         seg = rows[-w:]
         if seg:
-            ratio = round(sum(1 for r in seg if r[2] > 0) / len(seg) * 100, 1)
+            up = sum(1 for r in seg if r[2] > 0)        # 該窗 YoY 為正(增長)的月數
+            total = len(seg)                            # 該窗實際可比月數
+            ratio = round(up / total * 100, 1)
             out[f"{name}成長比率%"] = ratio
+            out[f"{name}增長月數"] = f"{up}/{total}"     # 計數形式:增長月數/可比月數
             if w == CLASS_WINDOW:
-                class_ratio, class_base = ratio, len(seg)
+                class_ratio, class_base = ratio, total
     out["_class_ratio"], out["_class_base"] = class_ratio, class_base
 
     last12 = rows[-12:]
@@ -300,8 +305,12 @@ def main():
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
         df = df.sort_values([sort_col, "連續成長月數"], ascending=False, na_position="last")
+        # 各窗並列「成長比率%」與「增長月數(增/可比,例 80/120)」
+        win_cols = []
+        for _, n in WINDOWS:                              # 近10年/5年/3年/1年
+            win_cols += [f"{n}成長比率%", f"{n}增長月數"]
         cols = (["代號", "分類"]
-                + [f"{n}成長比率%" for _, n in WINDOWS]          # 近10年/5年/3年/1年
+                + win_cols
                 + ["可比月數", "連續成長月數", "近12月樣態",
                    "最新月份", "最新月年增%", avg_col])
         df = df[[c for c in cols if c in df.columns]]

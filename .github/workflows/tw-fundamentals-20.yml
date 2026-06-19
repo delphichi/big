@@ -1,0 +1,61 @@
+name: 台股精選20 財報估值
+
+on:
+  workflow_dispatch:          # Actions 頁面手動執行
+  schedule:
+    # 06:00 UTC = 台北 14:00;每月 15 號(季報/月營收多已公布)
+    - cron: "0 6 15 * *"
+
+permissions:
+  contents: write
+
+jobs:
+  tw-fundamentals-20:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install FinMind pandas numpy openpyxl requests lxml
+
+      - name: Run TW fundamentals (20 picks)
+        env:
+          # repo → Settings → Secrets and variables → Actions 新增 FINMIND_TOKEN
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python fetch_fundamentals_tw20.py
+
+      - name: Upload Excel as artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: tw-fundamentals-20
+          path: data/台股精選20_財報估值.xlsx
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Commit output to repo
+        if: always()
+        run: |
+          STAMP=$(date -u +%Y%m%d)
+          if [ -f "data/台股精選20_財報估值.xlsx" ]; then
+            cp "data/台股精選20_財報估值.xlsx" "data/${STAMP}_台股精選20_財報估值.xlsx"
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ || true
+          if git diff --staged --quiet; then
+            echo "沒有新檔案,略過 commit"
+          else
+            git commit -m "data: 台股精選20 財報估值 ${STAMP}"
+            git push
+          fi

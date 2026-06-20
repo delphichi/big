@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-台股精選 30 檔 財報 + 估值 表 (TW Fundamentals & Valuation for 30 picks)
+台股 119 檔 財報 + 估值 表 (TW Fundamentals & Valuation, 119 picks)
 =======================================================================
-針對「月營收年增掃描」篩出、最值得深入研究的 30 檔,一次抓最近 ~5 年的三大表 +
-每日 PER/PBR/殖利率,算出 5 年趨勢、近四季經營績效與估值,輸出可排序的跨檔比較表,
-另含「逐年營收」「逐年EPS」跨檔對照,以及每檔逐季明細分頁。
+名單 = 月營收年增掃描中「近3年 ≥ 30/36」且可比≥36(完整3年)的全部 119 檔。
+一次抓最近 ~5 年的三大表 + 每日 PER/PBR/殖利率,算出 5 年趨勢、近四季經營績效、
+估值與「相對歷史水位」,輸出可排序的跨檔比較表 +「相對歷史水位」+「逐年營收/EPS」。
+股名由 FinMind taiwan_stock_info() 取官方名稱(避免人工標錯);金融股以「🏦」標記。
 
 資料來源:FinMind(taiwan_stock_financial_statement / balance_sheet /
           cash_flows_statement / per_pbr / month_revenue)。一次呼叫即回傳整段歷史,
           故抓 5 年與抓 3 年的 API 次數相同(每檔 5 次)。
-輸出   :data/台股精選30_財報估值.xlsx
+輸出   :data/台股119_財報估值.xlsx
 
 每檔算出:
   5 年趨勢 → 5年營收CAGR%、5年平均淨利率%、5年平均ROE%(只取季數=4 的完整年)
@@ -20,7 +21,8 @@
   成長     → 最新月營收年增%
 
 ★ 大量抓取務必設環境變數 FINMIND_TOKEN(免費約 300 次/hr、設 token 約 600 次/hr);
-  30 檔 × 5 dataset = 約 150 次呼叫,免費額度即可。
+  119 檔 × 5 dataset ≈ 595 次呼叫,設 token 約 1 小時內可完成。
+  撞到額度會自動「睡到下一個整點再續、不跳過該檔」(seconds_to_next_hour)。
 """
 
 import os, time
@@ -30,25 +32,35 @@ import numpy as np
 # ---------- 設定 ----------
 TOKEN      = os.environ.get("FINMIND_TOKEN", "")
 START_DATE = "2020-01-01"                 # 取 ~5 完整年(2021–2025)+ 年增基期
-OUTPUT     = "data/台股精選30_財報估值.xlsx"
-RATE_SLEEP = 1.0                          # 每檔間隔(降低撞限流機率)
-WRITE_DETAIL = True                       # 另輸出每檔逐季經營績效明細分頁
+OUTPUT     = "data/台股119_財報估值.xlsx"
+RATE_SLEEP = 0.4                          # 每檔間隔(降低撞限流機率)
+WRITE_DETAIL = False                      # 119 檔逐季明細會產生 119 分頁,預設關;要看單檔細節再開
 
-# 精選 30 檔(代號 → 名稱);來自月營收年增掃描的高一致性/長持續名單(已排除金融股、新上市)
+# 名單:月營收年增掃描中「近3年 ≥ 30/36」且可比≥36(完整3年)的全部標的 = 119 檔。
+# 只放代號,股名在 CI 由 FinMind taiwan_stock_info() 取官方名稱(避免人工標錯,如 2947 振宇五金)。
 PICKS = [
-    ("2330", "台積電"),   ("2308", "台達電"),   ("2345", "智邦"),
-    ("3017", "奇鋐"),     ("2383", "台光電"),   ("5274", "信驊"),
-    ("2059", "川湖"),     ("2368", "金像電"),   ("6223", "旺矽"),
-    ("6197", "佳必琪"),   ("4953", "緯軟"),     ("3293", "鈊象"),
-    ("2453", "凌群"),     ("3587", "閎康"),     ("2947", "大樹"),
-    ("4129", "聯合"),     ("5903", "全家"),     ("2912", "統一超"),
-    ("6446", "藥華藥"),   ("3004", "豐達科"),
-    # ── 擴充至 30(月營收最強的下一批,皆已上市多年)──
-    ("6721", "信實"),     ("6741", "91APP"),    ("6690", "安碁資訊"),
-    ("6791", "虎門科技"), ("2755", "揚秦"),     ("8462", "柏文"),
-    ("5904", "寶雅"),     ("3036", "文曄"),     ("5607", "遠雄港"),
-    ("2402", "毅嘉"),
+    # 近3年 36/36
+    "6721","6741","4953","2755","6690","2453","3293","4129","6791","2947",
+    "3017","6223","8462","6446","6449","4760",
+    # 35/36
+    "8932","2383","3090","3004","3587","5903","2912","1736","4431","2496","3583","2753",
+    # 34/36
+    "2890","6197","4904","2376","9911","2640","2752","2745","6712","3130","6469","1519",
+    # 33/36
+    "2441","5314","2345","2402","6870","5340","6407","2937","8432","4116","6279","3630","6803","5203",
+    # 32/36
+    "3167","2357","6274","6138","3265","2436","2884","5278","6830","6112","2812","6005",
+    "2480","5904","3526","1513","9917","6752","4905","5269","2641",
+    # 31/36
+    "5607","4128","6290","2363","8284","1785","2850","2374","2880","2887","6111","3036",
+    "6183","6462","6834","6612","3029","2645","2492","5493","7558","2836","3162","6733","3339","4173",
+    # 30/36
+    "6257","2059","2330","2368","8155","6530","2308","6787","1416","8016","1731","7578",
+    "3702","2412","3321","4114","6811","2891",
 ]
+
+# 金融股(營收/利潤率口徑不適用,輸出會標記;不影響抓取)
+FINANCIALS = {"2890","2884","2880","2887","2891","2812","2836","6005","2850"}
 
 
 # ---------- FinMind ----------
@@ -61,6 +73,26 @@ def make_loader():
         except Exception as e:
             print("token 登入失敗(改用免費額度):", e)
     return dl
+
+def load_names(dl):
+    """從 FinMind 取『代號→官方股名』對照(避免人工標錯)。失敗則回空 dict。"""
+    try:
+        info = dl.taiwan_stock_info()
+        return {str(r["stock_id"]): str(r["stock_name"]) for _, r in info.iterrows()}
+    except Exception as e:
+        print("取股名對照失敗(改用代號):", e)
+        return {}
+
+def _is_rate_limit(e):
+    msg = str(e).lower()
+    return any(k in msg for k in ("limit", "402", "429", "too many", "exceed", "request"))
+
+def seconds_to_next_hour(buffer=45):
+    """距下一個整點還有幾秒(FinMind 額度每小時重置),多加 buffer 秒保險。"""
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    nxt = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    return max(5, int((nxt - now).total_seconds()) + buffer)
 
 def get_per(dl, sid, start):
     """每日 PER/PBR/殖利率。先試 DataLoader,失敗退回原生 REST。"""
@@ -284,26 +316,30 @@ def summary_row(sid, name, raw):
 # ---------- 主流程 ----------
 def main():
     dl = make_loader()
+    namemap = load_names(dl)                            # 代號→官方股名
     rows, hists, details = [], [], {}
     rev_years, eps_years = {}, {}                      # {代號名稱: {年: 值}} 供逐年對照
-    for i, (sid, name) in enumerate(PICKS, 1):
+    for i, sid in enumerate(PICKS, 1):
+        name = namemap.get(sid, sid)
         print(f"[{i}/{len(PICKS)}] 抓取 {sid} {name} ...")
-        for attempt in range(3):
+        while True:                                    # 撞額度就睡到整點再續、不跳過此檔
             try:
                 raw = fetch_one(dl, sid, START_DATE)
                 row, perf, rev_y, eps_y, hist = summary_row(sid, name, raw)
+                if sid in FINANCIALS:                  # 金融股:營收/利潤率口徑不適用,標記
+                    row["金融"] = "🏦"; hist["金融"] = "🏦"
                 rows.append(row); hists.append(hist)
                 label = f"{sid} {name}"
                 if rev_y: rev_years[label] = rev_y
                 if eps_y: eps_years[label] = eps_y
                 if WRITE_DETAIL and not perf.empty:
-                    details[f"{sid}_{name}"] = perf[[c for c in perf.columns if not c.startswith("_")]]
+                    details[f"{sid}_{name}"[:31]] = perf[[c for c in perf.columns if not c.startswith("_")]]
                 break
             except Exception as e:
-                msg = str(e).lower()
-                if any(k in msg for k in ("limit", "402", "429", "too many", "exceed")) and attempt < 2:
-                    print(f"  ! 疑似限流,等 60s 重試({attempt+1}/2):{e}")
-                    time.sleep(60); continue
+                if _is_rate_limit(e):
+                    wait = seconds_to_next_hour()
+                    print(f"  ⏸ 疑似 FinMind 額度用罄 → 睡 {wait//60} 分 {wait%60} 秒到整點再續(不跳過 {sid})")
+                    time.sleep(wait); continue
                 print(f"  ! {sid} 失敗:{e}")
                 rows.append({"代號": sid, "名稱": name})
                 hists.append({"代號": sid, "名稱": name})
@@ -311,14 +347,14 @@ def main():
         time.sleep(RATE_SLEEP)
 
     df = pd.DataFrame(rows)
-    cols = ["代號", "名稱", "最新季",
+    cols = ["代號", "名稱", "金融", "最新季",
             "5年營收CAGR%", "5年平均淨利率%", "5年平均ROE%",          # ← 5 年趨勢
             "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%",  # ← 近四季快照
             "負債比%", "流動比%", "獲利含金量", "近四季自由現金流(億)",
             "PER", "PBR", "殖利率%", "最新月營收年增%"]
     df = df[[c for c in cols if c in df.columns]]
     for c in df.columns:
-        if c not in ("代號", "名稱", "最新季"):
+        if c not in ("代號", "名稱", "金融", "最新季"):
             df[c] = pd.to_numeric(df[c], errors="coerce")
     sort_key = "5年平均ROE%" if "5年平均ROE%" in df.columns else "近四季ROE%"
     df = df.sort_values(sort_key, ascending=False, na_position="last")
@@ -332,7 +368,7 @@ def main():
 
     # 相對歷史水位(現值 / 5年均 / 位階%)
     hdf = pd.DataFrame(hists)
-    hcols = ["代號", "名稱"]
+    hcols = ["代號", "名稱", "金融"]
     for label in ("毛利率", "營益率", "淨利率", "ROE", "PER", "PBR", "殖利率"):
         hcols += [f"{label}現", f"{label}5年均", f"{label}位階%"]
     hdf = hdf[[c for c in hcols if c in hdf.columns]]

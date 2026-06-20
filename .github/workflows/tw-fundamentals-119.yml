@@ -1,4 +1,4 @@
-name: 台股精選30 財報估值
+name: 台股119 財報估值
 
 on:
   workflow_dispatch:          # Actions 頁面手動執行
@@ -10,9 +10,9 @@ permissions:
   contents: write
 
 jobs:
-  tw-fundamentals-30:
+  tw-fundamentals-119:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 180
 
     steps:
       - name: Checkout repo
@@ -29,17 +29,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install FinMind pandas numpy openpyxl requests lxml
 
-      - name: Run TW fundamentals (30 picks)
+      - name: Run TW fundamentals (119 picks)
         env:
           # repo → Settings → Secrets and variables → Actions 新增 FINMIND_TOKEN
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-        run: python fetch_fundamentals_tw30.py
+        run: python fetch_fundamentals_tw119.py
 
       - name: Upload Excel as artifact
         uses: actions/upload-artifact@v6
         with:
-          name: tw-fundamentals-30
-          path: data/台股精選30_財報估值.xlsx
+          name: tw-fundamentals-119
+          path: data/台股119_財報估值.xlsx
           if-no-files-found: error
           retention-days: 90
 
@@ -47,8 +47,8 @@ jobs:
         if: always()
         run: |
           STAMP=$(date -u +%Y%m%d)
-          if [ -f "data/台股精選30_財報估值.xlsx" ]; then
-            cp "data/台股精選30_財報估值.xlsx" "data/${STAMP}_台股精選30_財報估值.xlsx"
+          if [ -f "data/台股119_財報估值.xlsx" ]; then
+            cp "data/台股119_財報估值.xlsx" "data/${STAMP}_台股119_財報估值.xlsx"
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -56,6 +56,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "沒有新檔案,略過 commit"
           else
-            git commit -m "data: 台股精選30 財報估值 ${STAMP}"
+            git commit -m "data: 台股119 財報估值 ${STAMP}"
             git push
           fi

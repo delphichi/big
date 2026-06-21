@@ -36,11 +36,12 @@ jobs:
         run: python fetch_fundamentals_tw119.py
 
       - name: Upload Excel as artifact
+        if: always()                       # 即使中途被取消,也上傳目前進度檔
         uses: actions/upload-artifact@v6
         with:
           name: tw-fundamentals-119
           path: data/台股119_財報估值.xlsx
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
 
       - name: Commit output to repo

@@ -21,11 +21,12 @@
   成長     → 最新月營收年增%
 
 ★ 大量抓取務必設環境變數 FINMIND_TOKEN(免費約 300 次/hr、設 token 約 600 次/hr);
-  119 檔 × 5 dataset ≈ 595 次呼叫,設 token 約 1 小時內可完成。
-  撞到額度會自動「睡到下一個整點再續、不跳過該檔」(seconds_to_next_hour)。
+  119 檔 × 5 dataset ≈ 595 次呼叫。
+  斷點續跑:每檔算完即存 data/_tw119_cache/{代號}.json,並每 10 檔重建一次 Excel;
+  撞額度會「睡到整點再續」,被取消/逾時也不丟進度——再跑一次會自動跳過已完成、接著抓。
 """
 
-import os, time
+import os, time, json
 import pandas as pd
 import numpy as np
 
@@ -313,51 +314,60 @@ def summary_row(sid, name, raw):
     return row, perf, rev_year, eps_year, hist
 
 
-# ---------- 主流程 ----------
-def main():
-    dl = make_loader()
-    namemap = load_names(dl)                            # 代號→官方股名
-    rows, hists, details = [], [], {}
-    rev_years, eps_years = {}, {}                      # {代號名稱: {年: 值}} 供逐年對照
-    for i, sid in enumerate(PICKS, 1):
+# ---------- 斷點續存(每檔算完即存,可續跑;被取消也不丟進度)----------
+CACHE_DIR = "data/_tw119_cache"
+
+def _cache_path(sid):
+    return os.path.join(CACHE_DIR, f"{sid}.json")
+
+def save_cache(sid, obj):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    tmp = _cache_path(sid) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, default=float)   # numpy 數值轉 float
+    os.replace(tmp, _cache_path(sid))                          # 原子寫入,避免半截檔
+
+def load_cache(sid):
+    p = _cache_path(sid)
+    if os.path.exists(p):
+        try:
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
+    return None
+
+
+# ---------- 由快取組出 Excel(每次都用『目前所有已完成』重建,故隨時有最新進度檔)----------
+def build_output(namemap):
+    rows, hists, rev_years, eps_years = [], [], {}, {}
+    done = 0
+    for sid in PICKS:
+        c = load_cache(sid)
+        if not c:
+            continue
+        done += 1
+        rows.append(c.get("row", {"代號": sid}))
+        hists.append(c.get("hist", {"代號": sid}))
         name = namemap.get(sid, sid)
-        print(f"[{i}/{len(PICKS)}] 抓取 {sid} {name} ...")
-        while True:                                    # 撞額度就睡到整點再續、不跳過此檔
-            try:
-                raw = fetch_one(dl, sid, START_DATE)
-                row, perf, rev_y, eps_y, hist = summary_row(sid, name, raw)
-                if sid in FINANCIALS:                  # 金融股:營收/利潤率口徑不適用,標記
-                    row["金融"] = "🏦"; hist["金融"] = "🏦"
-                rows.append(row); hists.append(hist)
-                label = f"{sid} {name}"
-                if rev_y: rev_years[label] = rev_y
-                if eps_y: eps_years[label] = eps_y
-                if WRITE_DETAIL and not perf.empty:
-                    details[f"{sid}_{name}"[:31]] = perf[[c for c in perf.columns if not c.startswith("_")]]
-                break
-            except Exception as e:
-                if _is_rate_limit(e):
-                    wait = seconds_to_next_hour()
-                    print(f"  ⏸ 疑似 FinMind 額度用罄 → 睡 {wait//60} 分 {wait%60} 秒到整點再續(不跳過 {sid})")
-                    time.sleep(wait); continue
-                print(f"  ! {sid} 失敗:{e}")
-                rows.append({"代號": sid, "名稱": name})
-                hists.append({"代號": sid, "名稱": name})
-                break
-        time.sleep(RATE_SLEEP)
+        if c.get("rev_year"): rev_years[f"{sid} {name}"] = c["rev_year"]
+        if c.get("eps_year"): eps_years[f"{sid} {name}"] = c["eps_year"]
+    if not rows:
+        print("尚無任何已完成資料,略過輸出"); return 0
 
     df = pd.DataFrame(rows)
     cols = ["代號", "名稱", "金融", "最新季",
-            "5年營收CAGR%", "5年平均淨利率%", "5年平均ROE%",          # ← 5 年趨勢
-            "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%",  # ← 近四季快照
+            "5年營收CAGR%", "5年平均淨利率%", "5年平均ROE%",
+            "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%",
             "負債比%", "流動比%", "獲利含金量", "近四季自由現金流(億)",
             "PER", "PBR", "殖利率%", "最新月營收年增%"]
     df = df[[c for c in cols if c in df.columns]]
-    for c in df.columns:
-        if c not in ("代號", "名稱", "金融", "最新季"):
-            df[c] = pd.to_numeric(df[c], errors="coerce")
+    for col in df.columns:
+        if col not in ("代號", "名稱", "金融", "最新季"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     sort_key = "5年平均ROE%" if "5年平均ROE%" in df.columns else "近四季ROE%"
-    df = df.sort_values(sort_key, ascending=False, na_position="last")
+    if sort_key in df.columns:
+        df = df.sort_values(sort_key, ascending=False, na_position="last")
 
     def pivot_years(d):
         if not d:
@@ -366,13 +376,12 @@ def main():
         out = pd.DataFrame({lbl: pd.Series(v) for lbl, v in d.items()}).T
         return out.reindex(columns=years)
 
-    # 相對歷史水位(現值 / 5年均 / 位階%)
     hdf = pd.DataFrame(hists)
     hcols = ["代號", "名稱", "金融"]
     for label in ("毛利率", "營益率", "淨利率", "ROE", "PER", "PBR", "殖利率"):
         hcols += [f"{label}現", f"{label}5年均", f"{label}位階%"]
     hdf = hdf[[c for c in hcols if c in hdf.columns]]
-    if "代號" in df.columns and "代號" in hdf.columns:        # 與主表同序,方便對照
+    if "代號" in df.columns and "代號" in hdf.columns:
         hdf = hdf.set_index("代號").reindex(df["代號"]).reset_index()
 
     os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
@@ -382,10 +391,44 @@ def main():
         ry, ey = pivot_years(rev_years), pivot_years(eps_years)
         if not ry.empty: ry.to_excel(xw, sheet_name="逐年營收(億)")
         if not ey.empty: ey.to_excel(xw, sheet_name="逐年EPS")
-        for key, perf in details.items():
-            perf.to_excel(xw, sheet_name=key[:31])
-    print(f"\n完成 → {OUTPUT}({len(df)} 檔)")
-    print(df.to_string(index=False))
+    print(f"  → 已更新 {OUTPUT}(目前 {done}/{len(PICKS)} 檔)")
+    return done
+
+
+# ---------- 主流程 ----------
+def main():
+    dl = make_loader()
+    namemap = load_names(dl)                            # 代號→官方股名
+    todo = [s for s in PICKS if load_cache(s) is None]
+    print(f"總 {len(PICKS)} 檔,已完成 {len(PICKS)-len(todo)} 檔,待抓 {len(todo)} 檔")
+    build_output(namemap)                              # 先用既有快取出一版(確保隨時有進度檔)
+
+    for i, sid in enumerate(todo, 1):
+        name = namemap.get(sid, sid)
+        print(f"[{i}/{len(todo)}] 抓取 {sid} {name} ...")
+        while True:                                    # 撞額度就睡到整點再續、不跳過此檔
+            try:
+                raw = fetch_one(dl, sid, START_DATE)
+                row, perf, rev_y, eps_y, hist = summary_row(sid, name, raw)
+                if sid in FINANCIALS:                  # 金融股標記
+                    row["金融"] = "🏦"; hist["金融"] = "🏦"
+                save_cache(sid, {"row": row, "hist": hist,
+                                 "rev_year": rev_y, "eps_year": eps_y})  # 立刻存,續跑用
+                break
+            except Exception as e:
+                if _is_rate_limit(e):
+                    wait = seconds_to_next_hour()
+                    print(f"  ⏸ 疑似 FinMind 額度用罄 → 睡 {wait//60} 分到整點再續(不跳過 {sid};已抓的有存檔)")
+                    time.sleep(wait); continue
+                print(f"  ! {sid} 失敗:{e}")
+                save_cache(sid, {"row": {"代號": sid, "名稱": name}, "hist": {"代號": sid, "名稱": name}})
+                break
+        if i % 10 == 0:                                # 每 10 檔重建一次 Excel(分段保存進度)
+            build_output(namemap)
+        time.sleep(RATE_SLEEP)
+
+    n = build_output(namemap)                          # 收尾再出一版完整的
+    print(f"\n完成 → {OUTPUT}({n}/{len(PICKS)} 檔)")
 
 
 if __name__ == "__main__":

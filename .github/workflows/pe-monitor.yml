@@ -1,0 +1,63 @@
+name: PE買入區間每日監看
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 09:00 UTC = 台北 17:00(收盤後,PER 已更新);週一~週五
+    - cron: "0 9 * * 1-5"
+
+permissions:
+  contents: write
+
+jobs:
+  pe-monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install FinMind pandas openpyxl requests lxml
+
+      - name: Run PE buy-zone monitor
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          # repo → Settings → Secrets:GMAIL_USER(你的 gmail)、
+          # GMAIL_APP_PASSWORD(Google 兩步驟驗證下產生的「應用程式密碼」,非一般密碼)
+          # 可選 MAIL_TO(收件者,預設寄給自己);EMAIL_ALWAYS=1 則每天都寄(含無訊號摘要)
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python pe_buyzone_monitor.py
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pe-buyzone
+          path: data/PE買入區間監看.xlsx
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Commit report to repo
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/PE買入區間監看.xlsx tickers_watch.txt || true
+          if git diff --staged --quiet; then
+            echo "無變更,略過 commit"
+          else
+            git commit -m "data: PE買入區間監看 $(date -u +%Y%m%d)"
+            git push
+          fi

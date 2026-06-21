@@ -1,67 +1,76 @@
 # -*- coding: utf-8 -*-
 """
-台股 119 檔 財報 + 估值 表 (TW Fundamentals & Valuation, 119 picks)
+台股 財報 + 估值 表 (TW Fundamentals & Valuation)
 =======================================================================
-名單 = 月營收年增掃描中「近3年 ≥ 30/36」且可比≥36(完整3年)的全部 119 檔。
-一次抓最近 ~5 年的三大表 + 每日 PER/PBR/殖利率,算出 5 年趨勢、近四季經營績效、
+名單 = 月營收年增掃描中表現最好的一批標的(共 179 檔,見 PICKS)。
+一次抓最近 ~5 年的三大表 + 股價 + 每日 PER/PBR/殖利率,算出 5 年趨勢、近四季經營績效、
 估值與「相對歷史水位」,輸出可排序的跨檔比較表 +「相對歷史水位」+「逐年營收/EPS」。
 股名由 FinMind taiwan_stock_info() 取官方名稱(避免人工標錯);金融股以「🏦」標記。
 
+★ PER 一律「自算」,不用 FinMind 的 per_pbr「PER」欄位 ★
+  FinMind 的 per_pbr「PER」基準 EPS 不一致、與 Goodinfo/財報狗對不上(例:奇鋐顯示 12 但
+  實際 ~47、台達電 19 但實際 ~79)。改成與 Goodinfo 本益比河流圖同一套:
+      PER = 收盤價 ÷ 近四季EPS,近四季EPS = 最近 4 個單季 EPS 加總(FinMind 財報已驗證準確)。
+  歷史 PER 序列以 merge_asof(收盤價對近四季EPS)逐日重算,並加上財報公布落後天數
+  (Q4 年報 +90 天、其餘 +45 天)避免未卜先知;PER 位階% 由此自算序列計算。
+  PBR 與 殖利率 仍取 per_pbr(價格基礎,可靠)。
+
 資料來源:FinMind(taiwan_stock_financial_statement / balance_sheet /
-          cash_flows_statement / per_pbr / month_revenue)。一次呼叫即回傳整段歷史,
-          故抓 5 年與抓 3 年的 API 次數相同(每檔 5 次)。
-輸出   :data/台股119_財報估值.xlsx
+          cash_flows_statement / daily / per_pbr / month_revenue)。一次呼叫即回傳整段歷史,
+          故抓 5 年與抓 3 年的 API 次數相同(每檔 6 次)。
+輸出   :data/台股財報估值.xlsx
 
 每檔算出:
   5 年趨勢 → 5年營收CAGR%、5年平均淨利率%、5年平均ROE%(只取季數=4 的完整年)
   近四季   → 毛利率 / 營益率 / 淨利率、近四季EPS、近四季ROE
   財務結構 → 負債比、流動比(最新季)
   現金流照妖鏡 → 獲利含金量(近四季營業現金流 ÷ 近四季淨利)、近四季自由現金流(億)
-  估值     → 目前 PER、PBR、殖利率%
+  估值     → 收盤、PER(自算)、PE位階%、PBR、殖利率%
   成長     → 最新月營收年增%
 
 ★ 大量抓取務必設環境變數 FINMIND_TOKEN(免費約 300 次/hr、設 token 約 600 次/hr);
-  119 檔 × 5 dataset ≈ 595 次呼叫。
-  斷點續跑:每檔算完即存 data/_tw119_cache/{代號}.json,並每 10 檔重建一次 Excel;
+  179 檔 × 6 dataset ≈ 1074 次呼叫 → 至少跨 2 個整點,務必用 token 並靠斷點續跑。
+  斷點續跑:每檔算完即存 data/_tw_val_cache/{代號}.json,並每 10 檔重建一次 Excel;
   撞額度會「睡到整點再續」,被取消/逾時也不丟進度——再跑一次會自動跳過已完成、接著抓。
 """
 
 import os, time, json
+from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 
 # ---------- 設定 ----------
 TOKEN      = os.environ.get("FINMIND_TOKEN", "")
 START_DATE = "2020-01-01"                 # 取 ~5 完整年(2021–2025)+ 年增基期
-OUTPUT     = "data/台股119_財報估值.xlsx"
+OUTPUT     = "data/台股財報估值.xlsx"
 RATE_SLEEP = 0.4                          # 每檔間隔(降低撞限流機率)
-WRITE_DETAIL = False                      # 119 檔逐季明細會產生 119 分頁,預設關;要看單檔細節再開
+WRITE_DETAIL = False                      # 逐季明細會產生很多分頁,預設關;要看單檔細節再開
 
-# 名單:月營收年增掃描中「近3年 ≥ 30/36」且可比≥36(完整3年)的全部標的 = 119 檔。
+# 名單:月營收年增掃描中表現最好的一批標的 = 179 檔。
 # 只放代號,股名在 CI 由 FinMind taiwan_stock_info() 取官方名稱(避免人工標錯,如 2947 振宇五金)。
 PICKS = [
-    # 近3年 36/36
     "6721","6741","4953","2755","6690","2453","3293","4129","6791","2947",
-    "3017","6223","8462","6446","6449","4760",
-    # 35/36
-    "8932","2383","3090","3004","3587","5903","2912","1736","4431","2496","3583","2753",
-    # 34/36
-    "2890","6197","4904","2376","9911","2640","2752","2745","6712","3130","6469","1519",
-    # 33/36
-    "2441","5314","2345","2402","6870","5340","6407","2937","8432","4116","6279","3630","6803","5203",
-    # 32/36
-    "3167","2357","6274","6138","3265","2436","2884","5278","6830","6112","2812","6005",
-    "2480","5904","3526","1513","9917","6752","4905","5269","2641",
-    # 31/36
-    "5607","4128","6290","2363","8284","1785","2850","2374","2880","2887","6111","3036",
-    "6183","6462","6834","6612","3029","2645","2492","5493","7558","2836","3162","6733","3339","4173",
-    # 30/36
-    "6257","2059","2330","2368","8155","6530","2308","6787","1416","8016","1731","7578",
-    "3702","2412","3321","4114","6811","2891",
+    "3017","6223","8462","6449","4760","6446","2432","6805","2762","6914",
+    "6952","6951","6968","2751","6739","4772","7762","8932","2383","3090",
+    "3004","3587","5903","2912","1736","4431","2496","3583","2753","6894",
+    "7706","6534","2949","2890","6197","4904","2376","9911","2640","2752",
+    "2745","6712","3130","6469","1519","4771","3715","6881","4569","2441",
+    "5314","2345","2402","6870","5340","6407","2937","8432","4116","6279",
+    "3630","6803","5203","6973","3167","2357","6274","6138","3265","2436",
+    "2884","5278","6830","6112","2812","6005","2480","5904","3526","1513",
+    "9917","6752","4905","5269","2641","6920","5607","4128","6290","2363",
+    "8284","1785","2850","2374","2880","2887","6111","3036","6183","6462",
+    "6834","6612","3029","2645","2492","5493","7558","2836","3162","6733",
+    "3339","4173","6903","7748","6257","2059","2330","2368","8155","6530",
+    "2308","6787","1416","8016","1731","7578","3702","2412","3321","4114",
+    "6811","2891","6947","6683","8021","5274","3551","6525","1316","3432",
+    "2471","8210","7590","3030","6584","3044","3028","4991","2889","3324",
+    "8936","6531","2353","6788","3097","3019","2816","6173","3687","3653",
+    "7556","5312","6776","3033","5601","9926","4951","1235","6959",
 ]
 
 # 金融股(營收/利潤率口徑不適用,輸出會標記;不影響抓取)
-FINANCIALS = {"2890","2884","2880","2887","2891","2812","2836","6005","2850"}
+FINANCIALS = {"2890","2884","2880","2887","2891","2812","2836","6005","2850","2889"}
 
 
 # ---------- FinMind ----------
@@ -90,13 +99,12 @@ def _is_rate_limit(e):
 
 def seconds_to_next_hour(buffer=45):
     """距下一個整點還有幾秒(FinMind 額度每小時重置),多加 buffer 秒保險。"""
-    from datetime import datetime, timedelta
     now = datetime.now()
     nxt = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     return max(5, int((nxt - now).total_seconds()) + buffer)
 
 def get_per(dl, sid, start):
-    """每日 PER/PBR/殖利率。先試 DataLoader,失敗退回原生 REST。"""
+    """每日 PER/PBR/殖利率(只取 PBR 與殖利率;PER 自算)。先試 DataLoader,失敗退回原生 REST。"""
     try:
         return dl.taiwan_stock_per_pbr(stock_id=sid, start_date=start)
     except Exception:
@@ -112,6 +120,7 @@ def fetch_one(dl, sid, start):
         "損益表":    dl.taiwan_stock_financial_statement(stock_id=sid, start_date=start),
         "資產負債表": dl.taiwan_stock_balance_sheet(stock_id=sid, start_date=start),
         "現金流量表": dl.taiwan_stock_cash_flows_statement(stock_id=sid, start_date=start),
+        "股價":      dl.taiwan_stock_daily(stock_id=sid, start_date=start),
         "月營收":    dl.taiwan_stock_month_revenue(stock_id=sid, start_date=start),
         "PER":      get_per(dl, sid, start),
     }
@@ -145,6 +154,45 @@ def decum(s):
         out[d] = (v - prev_v) if (y == prev_y and prev_v is not None) else v
         prev_y, prev_v = y, v
     return pd.Series(out)
+
+
+# ---------- 自算 PER(收盤價 ÷ 近四季EPS,含公布落後)----------
+def ttm_eps(inc_df):
+    """單季 EPS → 近四季EPS 序列(index=季底日,加上公布落後天數當『生效日』,避免未卜先知)。"""
+    piv = pivot(inc_df)
+    if piv.empty or "EPS" not in piv.columns:
+        return None
+    eps = pd.to_numeric(piv["EPS"], errors="coerce").dropna()
+    if len(eps) < 4:
+        return None
+    ttm = eps.rolling(4).sum().dropna()
+    rows = []
+    for d, v in ttm.items():
+        qend = pd.to_datetime(d)
+        lag = 90 if qend.month == 12 else 45        # Q4(年報)約90天、其餘約45天才公布
+        rows.append((qend + timedelta(days=lag), float(v)))
+    return pd.DataFrame(rows, columns=["生效日", "近四季EPS"]).sort_values("生效日")
+
+def per_series(price_df, inc_df):
+    """逐日自算 PER = 收盤價 ÷ 近四季EPS(merge_asof 向後對齊,只取 EPS>0 的交易日)。
+    回傳含 date / close / 近四季EPS / PER 的 DataFrame;資料不足回 None。"""
+    tt = ttm_eps(inc_df)
+    if tt is None or tt.empty:
+        return None
+    if price_df is None or price_df.empty or "close" not in price_df.columns:
+        return None
+    p = price_df[["date", "close"]].copy()
+    p["close"] = pd.to_numeric(p["close"], errors="coerce")
+    p = p.dropna().sort_values("date")
+    if p.empty:
+        return None
+    p["生效日"] = pd.to_datetime(p["date"])
+    m = pd.merge_asof(p.sort_values("生效日"), tt, on="生效日", direction="backward")
+    m = m[(m["近四季EPS"] > 0)].copy()
+    if m.empty:
+        return None
+    m["PER"] = m["close"] / m["近四季EPS"]
+    return m
 
 
 # ---------- 逐季經營績效 ----------
@@ -237,8 +285,9 @@ def _ttm_series(perf):
         })
     return rows
 
-def hist_levels(sid, name, perf, per_df):
-    """回傳一檔的『現值 / 5年均 / 位階%』。位階% = 目前值 ≤ 之歷史比例(0–100)。"""
+def hist_levels(sid, name, perf, per_df, per_ser):
+    """回傳一檔的『現值 / 5年均 / 位階%』。位階% = 目前值 ≤ 之歷史比例(0–100)。
+    PER 位階用『自算 PER 序列』(per_ser);PBR/殖利率用 per_pbr(價格基礎,可靠)。"""
     out = {"代號": sid, "名稱": name}
     def lvl(vals, cur, prefix, dec=1):
         v = pd.Series([x for x in vals if x is not None and pd.notna(x)], dtype="float64")
@@ -251,12 +300,19 @@ def hist_levels(sid, name, perf, per_df):
         series = [r[key] for r in ttm]
         cur = series[-1] if series else None
         lvl(series, cur, label)
+    # PER:自算序列
+    if per_ser is not None and not per_ser.empty:
+        s = per_ser["PER"].replace([float("inf")], pd.NA).dropna()
+        s = s[s > 0]
+        if len(s):
+            lvl(list(s), float(s.iloc[-1]), "PER", 2)
+    # PBR / 殖利率:per_pbr
     if per_df is not None and not per_df.empty:
         p = per_df.sort_values("date")
-        for col, label, dec in (("PER", "PER", 2), ("PBR", "PBR", 2), ("dividend_yield", "殖利率", 2)):
+        for col, label, dec in (("PBR", "PBR", 2), ("dividend_yield", "殖利率", 2)):
             s = pd.to_numeric(p.get(col), errors="coerce").dropna()
-            if label in ("PER", "PBR"):
-                s = s[s > 0]                                  # 濾掉虧損期的負/零 PER
+            if label == "PBR":
+                s = s[s > 0]
             if len(s):
                 lvl(list(s), float(s.iloc[-1]), label, dec)
     return out
@@ -301,21 +357,29 @@ def summary_row(sid, name, raw):
             row["獲利含金量"] = round(ocf4 / ni4, 2)
         row["近四季自由現金流(億)"] = round(float(last4["自由現金流(億)"].sum(skipna=True)), 1)
         row["最新季"] = str(perf.index[-1])
-    # 估值:目前 PER/PBR/殖利率
-    per = raw["PER"]
+
+    # 估值:PER 自算(收盤 ÷ 近四季EPS);PBR / 殖利率 取 per_pbr
+    ps = per_series(raw.get("股價"), raw.get("損益表"))
+    if ps is not None and not ps.empty:
+        s = ps["PER"].replace([float("inf")], pd.NA).dropna()
+        s = s[s > 0]
+        if len(s):
+            row["收盤"]      = round(float(ps["close"].iloc[-1]), 1)
+            row["PER(自算)"] = round(float(s.iloc[-1]), 2)
+            row["PE位階%"]   = round(float((s <= s.iloc[-1]).mean() * 100))
+    per = raw.get("PER")
     if per is not None and not per.empty:
         p = per.sort_values("date").iloc[-1]
-        row["PER"]    = p.get("PER")
         row["PBR"]    = p.get("PBR")
         row["殖利率%"] = p.get("dividend_yield")
     # 成長:最新月營收年增
     row["最新月營收年增%"] = revenue_yoy(raw)
-    hist = hist_levels(sid, name, perf, raw.get("PER")) if not perf.empty else {"代號": sid, "名稱": name}
+    hist = hist_levels(sid, name, perf, raw.get("PER"), ps) if not perf.empty else {"代號": sid, "名稱": name}
     return row, perf, rev_year, eps_year, hist
 
 
 # ---------- 斷點續存(每檔算完即存,可續跑;被取消也不丟進度)----------
-CACHE_DIR = "data/_tw119_cache"
+CACHE_DIR = "data/_tw_val_cache"
 
 def _cache_path(sid):
     return os.path.join(CACHE_DIR, f"{sid}.json")
@@ -360,7 +424,7 @@ def build_output(namemap):
             "5年營收CAGR%", "5年平均淨利率%", "5年平均ROE%",
             "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%",
             "負債比%", "流動比%", "獲利含金量", "近四季自由現金流(億)",
-            "PER", "PBR", "殖利率%", "最新月營收年增%"]
+            "收盤", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%"]
     df = df[[c for c in cols if c in df.columns]]
     for col in df.columns:
         if col not in ("代號", "名稱", "金融", "最新季"):

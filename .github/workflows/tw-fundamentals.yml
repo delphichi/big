@@ -58,11 +58,14 @@ jobs:
             echo "沒有新檔案,略過 commit"; exit 0
           fi
           git commit -m "data: 台股 財報估值(179檔, 自算PER) ${STAMP}"
-          # main 可能同時被其他 workflow push 動到 → 先 rebase 再推,重試數次,避免進度白做
+          # 輸出檔(cache JSON / 二進位 Excel)每次重新產生,rebase 必撞 add/add 衝突。
+          # 改用 fetch + merge -X ours:衝突一律保留本次最新產物,同時併入 main 其他非衝突變更。
           for i in 1 2 3 4 5; do
-            if git pull --rebase --autostash origin main && git push; then
+            git fetch origin main || { echo "fetch 失敗,重試 $i ..."; sleep 6; continue; }
+            if git merge -X ours --no-edit origin/main && git push origin HEAD:main; then
               echo "pushed"; exit 0
             fi
+            git merge --abort 2>/dev/null || true
             echo "push 衝突,重試 $i ..."; sleep 6
           done
           echo "push 最終失敗(進度仍在 artifact)"; exit 1

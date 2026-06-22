@@ -64,6 +64,16 @@ def make_loader():
             print("token 登入失敗(改用免費額度):", e)
     return dl
 
+def _is_rate_limit(e):
+    msg = str(e).lower()
+    return any(k in msg for k in ("limit", "402", "429", "too many", "exceed", "request"))
+
+def seconds_to_next_hour(buffer=45):
+    """距下一個整點還有幾秒(FinMind 額度每小時重置),多加 buffer 秒保險。"""
+    now = datetime.now()
+    nxt = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    return max(5, int((nxt - now).total_seconds()) + buffer)
+
 def names_map(dl):
     try:
         info = dl.taiwan_stock_info()
@@ -180,13 +190,20 @@ def main():
     print(f"監看 {len(watch)} 檔,買入區間 = 自算 PE 位階 ≤ {BUY_PCTL}%")
     rows = []
     for i, sid in enumerate(watch, 1):
-        try:
-            price = dl.taiwan_stock_daily(stock_id=sid, start_date=p_start)
-            fin   = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=f_start)
-            dy    = get_dividend_yield(dl, sid, p_start)
-            r = analyze(price, fin, dy)
-        except Exception as e:
-            print(f"  ! {sid} 失敗:{e}"); r = None
+        r = None
+        while True:                                    # 撞額度就睡到整點再續、不跳過此檔
+            try:
+                price = dl.taiwan_stock_daily(stock_id=sid, start_date=p_start)
+                fin   = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=f_start)
+                dy    = get_dividend_yield(dl, sid, p_start)
+                r = analyze(price, fin, dy)
+                break
+            except Exception as e:
+                if _is_rate_limit(e):
+                    wait = seconds_to_next_hour()
+                    print(f"  ⏸ 疑似 FinMind 額度用罄 → 睡 {wait//60} 分到整點再續(不跳過 {sid})")
+                    time.sleep(wait); continue
+                print(f"  ! {sid} 失敗:{e}"); r = None; break
         if r:
             rows.append({"代號": sid, "名稱": nm.get(sid, sid), **r})
             tag = "★買入區間" if r["_buy"] else f"距{r['距買入區間%']}%"

@@ -12,7 +12,7 @@ permissions:
 jobs:
   pe-monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 120          # 免費額度撞限時會睡到整點再續(最多跨一個整點),故放寬
 
     steps:
       - name: Checkout repo

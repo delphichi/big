@@ -12,7 +12,7 @@ permissions:
 jobs:
   pe-monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30           # 腳本自身 25 分自停(短重試→跳過,漏的明日補),此為硬上限控計費
 
     steps:
       - name: Checkout repo

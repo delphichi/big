@@ -30,12 +30,16 @@ import requests
 # ---------- 設定 ----------
 TOKEN       = os.environ.get("FINMIND_TOKEN", "")
 WATCH_FILE  = "tickers_watch.txt"
+HEALTH_FILE = "data/台股_體檢總表.xlsx"   # 體檢評分(品質濾鏡來源);無此檔則退回裸PE監看
 OUTPUT      = "data/PE買入區間監看.xlsx"
 BUY_PCTL    = 20                 # 買入區間:自算 PE 位階 ≤ 此百分位
 YEARS       = 5                  # PE 位階用近幾年分布
 MIN_DAYS    = 250               # PER 序列至少要有的天數
 REQ_SLEEP   = 0.3
 BANDS       = [10, 14, 18, 22, 26, 30]   # 本益比河流圖倍數
+MAX_RUNTIME_MIN = 25                       # 整輪上限(分):控 Actions 計費,漏抓的明日補
+RATE_WAIT_CAP   = 90                       # 撞額度最多睡幾秒(不睡到整點)
+MAX_RATE_RETRY  = 2                        # 撞額度短重試次數,仍失敗就跳過
 
 GMAIL_USER  = os.environ.get("GMAIL_USER", "")
 GMAIL_PASS  = os.environ.get("GMAIL_APP_PASSWORD", "")
@@ -63,6 +67,16 @@ def make_loader():
         except Exception as e:
             print("token 登入失敗(改用免費額度):", e)
     return dl
+
+def _is_rate_limit(e):
+    msg = str(e).lower()
+    return any(k in msg for k in ("limit", "402", "429", "too many", "exceed", "request"))
+
+def seconds_to_next_hour(buffer=45):
+    """距下一個整點還有幾秒(FinMind 額度每小時重置),多加 buffer 秒保險。"""
+    now = datetime.now()
+    nxt = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    return max(5, int((nxt - now).total_seconds()) + buffer)
 
 def names_map(dl):
     try:
@@ -152,6 +166,53 @@ def analyze(price_df, fin_df, dy):
     return out
 
 
+# ---------- 體檢分數(品質濾鏡) ----------
+def load_health():
+    """讀體檢總表 → {代號: {評等,品質總分,含金量,EPS3y,循環,PBR位階}}。無檔則回空 dict(退回裸PE)。"""
+    if not os.path.exists(HEALTH_FILE):
+        print("無體檢總表,退回裸 PE 監看(建議先跑 stock_health_check.py)"); return {}
+    try:
+        h = pd.read_excel(HEALTH_FILE, "體檢總表"); h["代號"] = h["代號"].astype(str)
+    except Exception as e:
+        print("讀體檢總表失敗,退回裸PE:", e); return {}
+    out = {}
+    for _, r in h.iterrows():
+        out[r["代號"]] = {
+            "評等": r.get("評等"), "品質總分": r.get("品質總分"),
+            "含金量": pd.to_numeric(r.get("含金量"), errors="coerce"),
+            "EPS3y": pd.to_numeric(r.get("EPS近3y%"), errors="coerce"),
+            "PBR位階": pd.to_numeric(r.get("PBR位階"), errors="coerce"),
+            "循環": "循環" in str(r.get("循環股", "")),
+        }
+    return out
+
+
+def classify(r, h):
+    """三層訊號:⭐優質買點 / ⚠️便宜陷阱 / 🔄循環買點(PBR) / (空=非買點)。
+    r=今日PE分析(含PE位階%);h=該檔體檢(可能None)。"""
+    pe_buy = r["PE位階%"] <= BUY_PCTL
+    if not h:                                     # 無體檢資料
+        return "❔未評(無體檢)" if pe_buy else ""
+    if h["評等"] == "金融🏦":                       # 金融股:不評分,看PBR/殖利率自行判斷
+        return "🏦金融(看PBR/殖利率)" if pe_buy else ""
+    grade = h["評等"]; g = h["含金量"]; e3 = h["EPS3y"]
+    if h["循環"]:                                  # 循環股:PER失真,改看PBR位階
+        pbr = h["PBR位階"]
+        if pd.notna(pbr) and pbr <= BUY_PCTL:
+            # 循環買點也要品質gate:健康的循環(非D級+有現金)才算,否則是陷阱
+            healthy = (grade != "D") and (pd.notna(g) and g >= 0.8)
+            return "🔄循環買點(PBR)" if healthy else "⚠️便宜陷阱"
+        return ""
+    if not pe_buy:                                 # 非循環:沒落入PE買區就不是買點
+        return ""
+    cash_ok = (pd.notna(g) and g >= 1.0) and (pd.notna(e3) and e3 > 0)
+    if grade == "A" and cash_ok:
+        return "⭐A級買點"                          # 便宜+頂級品質+真成長
+    if grade == "B" and cash_ok:
+        return "✅B級買點"                          # 便宜+合格(成長普通,偏防禦/領息)
+    return "⚠️便宜陷阱"
+
+
 # ---------- Email ----------
 def send_email(subject, html):
     if not (GMAIL_USER and GMAIL_PASS and MAIL_TO):
@@ -177,39 +238,84 @@ def main():
     p_start = f"{y - YEARS}-01-01"          # 股價近5年
     f_start = f"{y - YEARS - 2}-01-01"      # 財報多抓2年,確保序列起點就有近四季EPS
     watch = load_watch()
-    print(f"監看 {len(watch)} 檔,買入區間 = 自算 PE 位階 ≤ {BUY_PCTL}%")
+    health = load_health()
+    print(f"監看 {len(watch)} 檔,買入區間 = 自算 PE 位階 ≤ {BUY_PCTL}%;體檢覆蓋 {len(health)} 檔")
+    t0 = time.time()
     rows = []
     for i, sid in enumerate(watch, 1):
-        try:
-            price = dl.taiwan_stock_daily(stock_id=sid, start_date=p_start)
-            fin   = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=f_start)
-            dy    = get_dividend_yield(dl, sid, p_start)
-            r = analyze(price, fin, dy)
-        except Exception as e:
-            print(f"  ! {sid} 失敗:{e}"); r = None
+        if time.time() - t0 > MAX_RUNTIME_MIN * 60:    # 整輪超時 → 收尾(此監看每日跑,漏的明日補)
+            print(f"⏲ 已達 {MAX_RUNTIME_MIN} 分上限,本輪先收尾(剩 {len(watch)-i+1} 檔明日補)")
+            break
+        r = None; tries = 0
+        while True:
+            try:
+                price = dl.taiwan_stock_daily(stock_id=sid, start_date=p_start)
+                fin   = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=f_start)
+                dy    = get_dividend_yield(dl, sid, p_start)
+                r = analyze(price, fin, dy)
+                break
+            except Exception as e:
+                if _is_rate_limit(e) and tries < MAX_RATE_RETRY:
+                    tries += 1
+                    print(f"  ⏸ 疑似額度用罄 → 睡 {RATE_WAIT_CAP}s 短重試({tries}/{MAX_RATE_RETRY})")
+                    time.sleep(RATE_WAIT_CAP); continue
+                if _is_rate_limit(e):
+                    print(f"  ↷ {sid} 額度未恢復,本輪跳過"); r = None; break
+                print(f"  ! {sid} 失敗:{e}"); r = None; break
         if r:
-            rows.append({"代號": sid, "名稱": nm.get(sid, sid), **r})
-            tag = "★買入區間" if r["_buy"] else f"距{r['距買入區間%']}%"
-            print(f"[{i}/{len(watch)}] {sid} {nm.get(sid,sid):6s} PER {r['PER現(自算)']:>6} 位階{r['PE位階%']:>3} {tag}")
+            h = health.get(sid)
+            sig = classify(r, h)
+            row = {"代號": sid, "名稱": nm.get(sid, sid), **r}
+            row["訊號"] = sig
+            row["評等"] = h["評等"] if h else ""
+            row["含金量"] = h["含金量"] if h else None
+            row["EPS近3y%"] = h["EPS3y"] if h else None
+            row["PBR位階"] = h["PBR位階"] if h else None
+            row["循環"] = "⚠️" if (h and h["循環"]) else ""
+            rows.append(row)
+            print(f"[{i}/{len(watch)}] {sid} {nm.get(sid,sid):6s} 位階{r['PE位階%']:>3} {sig or ''}")
         time.sleep(REQ_SLEEP)
 
     if not rows:
         print("無有效資料"); return
-    df = pd.DataFrame(rows).sort_values("PE位階%")
-    buy = df[df["_buy"]].drop(columns="_buy")
-    allv = df.drop(columns="_buy")
+    df = pd.DataFrame(rows).drop(columns="_buy").sort_values("PE位階%")
+
+    star = df[df["訊號"] == "⭐A級買點"]
+    bgrade = df[df["訊號"] == "✅B級買點"]
+    trap = df[df["訊號"] == "⚠️便宜陷阱"]
+    cyc  = df[df["訊號"] == "🔄循環買點(PBR)"]
+    fin  = df[df["訊號"] == "🏦金融(看PBR/殖利率)"]
+    unrated = df[df["訊號"] == "❔未評(無體檢)"]
+
+    view = ["代號", "名稱", "訊號", "評等", "收盤", "PER現(自算)", "PE位階%", "PBR位階",
+            "含金量", "EPS近3y%", "循環", "買入價(P20×EPS)", "距買入區間%", "殖利率%"]
+    def v(d):
+        return d[[c for c in view if c in d.columns]]
 
     os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
     with pd.ExcelWriter(OUTPUT, engine="openpyxl") as xw:
-        buy.to_excel(xw, sheet_name="今日買入區間", index=False)
-        allv.to_excel(xw, sheet_name="全部監看", index=False)
+        v(star).to_excel(xw, sheet_name="A級買點", index=False)
+        v(bgrade).to_excel(xw, sheet_name="B級買點", index=False)
+        v(cyc).to_excel(xw, sheet_name="循環股買點(看PBR)", index=False)
+        v(fin).to_excel(xw, sheet_name="金融(看PBR殖利率)", index=False)
+        v(trap).to_excel(xw, sheet_name="便宜但陷阱", index=False)
+        df.to_excel(xw, sheet_name="全部監看", index=False)
 
     today = datetime.now().strftime("%Y-%m-%d")
-    if len(buy):
-        cols = ["代號", "名稱", "收盤", "近四季EPS", "PER現(自算)", "PE買入門檻(P20)", "PE位階%", "買入價(P20×EPS)", "殖利率%"]
-        html = (f"<h3>{today} 進入買入區間(自算 PE 位階 ≤ {BUY_PCTL}%)共 {len(buy)} 檔</h3>"
-                + buy[cols].to_html(index=False, border=1))
-        send_email(f"【PE買入區間】{today} {len(buy)} 檔進場訊號", html)
+    print(f"\n⭐A級買點 {len(star)} / ✅B級買點 {len(bgrade)} / 🔄循環 {len(cyc)} / "
+          f"🏦金融 {len(fin)} / ⚠️陷阱 {len(trap)} / ❔未評 {len(unrated)}")
+    # 寄 A 級 + B 級買點(真訊號,分級呈現);其餘只附摘要
+    if len(star) or len(bgrade):
+        cols = ["代號", "名稱", "評等", "收盤", "PER現(自算)", "PE位階%", "含金量", "EPS近3y%", "買入價(P20×EPS)", "殖利率%"]
+        html = f"<h3>{today} 買點訊號(體檢加持)</h3>"
+        if len(star):
+            html += f"<h4>⭐ A級買點 {len(star)} 檔(便宜+頂級品質+真成長)</h4>" + star[cols].to_html(index=False, border=1)
+        if len(bgrade):
+            html += f"<h4>✅ B級買點 {len(bgrade)} 檔(便宜+合格,成長普通偏防禦/領息)</h4>" + bgrade[cols].to_html(index=False, border=1)
+        html += (f"<p>另:🔄循環買點 {len(cyc)}、🏦金融 {len(fin)}、⚠️便宜陷阱 {len(trap)}(已過濾),詳見 {OUTPUT}。</p>")
+        send_email(f"【買點】{today} A級{len(star)}/B級{len(bgrade)} 檔(體檢加持)", html)
+    else:
+        print("今日無 A/B 級買點,不寄信")
 
     print(f"\n完成 → {OUTPUT};今日買入區間 {len(buy)} 檔 / 監看 {len(allv)} 檔")
     if len(buy):

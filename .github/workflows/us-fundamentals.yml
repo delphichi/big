@@ -1,0 +1,55 @@
+name: 美股 體檢總表
+
+on:
+  workflow_dispatch:
+    inputs:
+      watch_file:
+        description: '名單檔 (預設核心50檔;改 tickers_us.txt 跑全258檔需Starter方案)'
+        required: false
+        default: 'tickers_us_core.txt'
+  schedule:
+    # 每週一 10:00 UTC(美股財報更新後)
+    - cron: "0 10 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  us-fundamentals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas openpyxl
+
+      - name: Run US health check (FMP)
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          US_WATCH_FILE: ${{ inputs.watch_file || 'tickers_us_core.txt' }}
+        run: python fetch_fundamentals_us.py
+
+      - name: Commit report to repo
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/美股體檢總表.xlsx || true
+          if git diff --staged --quiet; then echo "無變更"; exit 0; fi
+          git commit -m "data: 美股體檢總表 $(date -u +%Y%m%d)"
+          for i in 1 2 3 4 5; do
+            git fetch origin main -q && git merge origin/main -X ours --no-edit >/dev/null 2>&1
+            git push && { echo pushed; exit 0; }
+            sleep 6
+          done

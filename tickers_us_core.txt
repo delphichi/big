@@ -1,0 +1,67 @@
+# 美股核心觀察名單(50檔精選) — 從前面四批螢幕清單分析的「好公司+好價格」交集
+# 篩選邏輯:高 ROIC + PEG<1 或 PE合理 + 排除明顯陷阱(負成長/超貴/題材股)
+# 適用免費 FMP 250 calls/day(50×5=250 剛好)
+
+# === 科技/軟體(高 ROIC 且估值不極端) ===
+GOOG
+GOOGL
+MSFT
+META
+NFLX
+NVDA
+TSM
+ADBE
+INTU
+ADSK
+DXCM
+FICO
+PYPL
+ZTS
+
+# === 醫藥/醫療通路(最大價值窪地) ===
+MCK
+COR
+CAH
+HCA
+CI
+GILD
+BMY
+RMD
+INCY
+LLY
+
+# === 保險/資產管理(高 ROIC + 低 PEG 的價值窪地) ===
+PGR
+TRV
+AON
+HIG
+AFL
+ALL
+AMP
+CINF
+TROW
+CB
+PRU
+
+# === 消費/防禦 ===
+COST
+WMT
+KO
+PM
+PG
+MCD
+COST
+
+# === 銀行(便宜的P/B<2) ===
+JPM
+WFC
+USB
+PNC
+
+# === 工業/其他高品質 ===
+BKNG
+ORLY
+NOC
+GD
+EME
+LIN

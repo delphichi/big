@@ -113,11 +113,25 @@ def fetch_one(sym):
     ttm0 = ttm[0] if ttm else {}
     prof0 = prof[0] if prof else {}
 
-    # 5 年歷史 PE/PB → 位階
-    hist_pe = [r.get("priceEarningsRatio") for r in ratios]
-    hist_pb = [r.get("priceToBookRatio") for r in ratios]
-    cur_pe = ttm0.get("peRatioTTM")
-    cur_pb = ttm0.get("pbRatioTTM")
+    def pick(d, *keys):
+        """從 dict 依序試多個鍵名,回第一個非None。FMP stable 端點鍵名常變。"""
+        for k in keys:
+            v = d.get(k)
+            if v is not None: return v
+        return None
+
+    # 5 年歷史 PE/PB → 位階(ratios stable 鍵名)
+    hist_pe = [pick(r, "priceEarningsRatio", "priceToEarningsRatio", "peRatio") for r in ratios]
+    hist_pb = [pick(r, "priceToBookRatio", "priceToBookValueRatio", "pbRatio") for r in ratios]
+    # TTM 估值(key-metrics-ttm stable 鍵名)
+    cur_pe = pick(ttm0, "peRatioTTM", "priceToEarningsRatioTTM", "priceEarningsRatioTTM")
+    cur_pb = pick(ttm0, "pbRatioTTM", "priceToBookRatioTTM", "priceToBookValueRatioTTM")
+    # TTM ROE/ROIC
+    _roe = pick(ttm0, "roeTTM", "returnOnEquityTTM")
+    _roic = pick(ttm0, "roicTTM", "returnOnInvestedCapitalTTM", "returnOnCapitalEmployedTTM")
+    _peg = pick(ttm0, "pegRatioTTM", "priceToEarningsGrowthRatioTTM")
+    _dy = pick(ttm0, "dividendYieldTTM", "dividendYieldPercentageTTM")
+    _debt = pick(ttm0, "debtToAssetsTTM", "totalDebtToAssetsTTM")
 
     rev_l = rev[-1] if rev else None
     ni_l  = ni[-1] if ni else None
@@ -135,16 +149,16 @@ def fetch_one(sym):
         "淨利率%": round(ni_l / rev_l * 100, 1) if ni_l and rev_l else np.nan,
         "EPS5y%": round(cagr(eps, min(4, len(eps)-1)) * 100, 1) if len(eps) >= 2 else np.nan,
         "EPS3y%": round(cagr(eps, 3) * 100, 1) if len(eps) >= 4 else np.nan,
-        "ROE%":   round(ttm0.get("roeTTM", 0) * 100, 1) if ttm0.get("roeTTM") else np.nan,
-        "ROIC%":  round(ttm0.get("roicTTM", 0) * 100, 1) if ttm0.get("roicTTM") else np.nan,
+        "ROE%":   round(_roe * 100, 1) if _roe else np.nan,
+        "ROIC%":  round(_roic * 100, 1) if _roic else np.nan,
         "含金量": round(ocf[-1] / ni_l, 2) if ocf and ni_l else np.nan,
-        "負債比%": round(ttm0.get("debtToAssetsTTM", 0) * 100, 1) if ttm0.get("debtToAssetsTTM") else np.nan,
+        "負債比%": round(_debt * 100, 1) if _debt else np.nan,
         "PER":  round(cur_pe, 1) if cur_pe else np.nan,
         "PE位階": historical_pctl(hist_pe, cur_pe),
         "PBR":  round(cur_pb, 2) if cur_pb else np.nan,
         "PBR位階": historical_pctl(hist_pb, cur_pb),
-        "PEG":  round(ttm0.get("pegRatioTTM", np.nan), 2) if ttm0.get("pegRatioTTM") else np.nan,
-        "殖利率%": round(ttm0.get("dividendYieldTTM", 0) * 100, 2) if ttm0.get("dividendYieldTTM") else 0,
+        "PEG":  round(_peg, 2) if _peg else np.nan,
+        "殖利率%": round(_dy * 100, 2) if _dy else 0,
         "_eps_series": eps,
         "_q_gm": q_gm,
     }
@@ -218,8 +232,15 @@ def main():
     print(f"美股觀察名單 {len(watch)} 檔,FMP 抓取...")
     rows = []
     q_gm_all = {}
+    debug_done = False
     for i, sym in enumerate(watch, 1):
         try:
+            if not debug_done:                 # 第一檔印 ttm/ratios 鍵名,供校準
+                _t = get("key-metrics-ttm", symbol=sym)
+                _r = get("ratios", symbol=sym, period="annual", limit=5)
+                print(f"DEBUG {sym} ttm keys:", list((_t[0] if _t else {}).keys())[:20])
+                print(f"DEBUG {sym} ratios keys:", list((_r[0] if _r else {}).keys())[:20])
+                debug_done = True
             r = fetch_one(sym)
             v_eps = r.pop("_eps_series")
             q_gm  = r.pop("_q_gm")

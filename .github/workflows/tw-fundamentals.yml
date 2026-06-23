@@ -3,8 +3,8 @@ name: 台股 財報估值
 on:
   workflow_dispatch:          # Actions 頁面手動執行
   schedule:
-    # 06:00 UTC = 台北 14:00;每月 15 號(季報/月營收多已公布)
-    - cron: "0 6 15 * *"
+    # 06:00 UTC = 台北 14:00;每週一(財報季度才變,週更足夠;靠快取續抓、跑完即快)
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: write
@@ -12,7 +12,7 @@ permissions:
 jobs:
   tw-fundamentals:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 35       # 腳本自身 30 分自停;此為硬上限,控 Actions 計費
 
     steps:
       - name: Checkout repo

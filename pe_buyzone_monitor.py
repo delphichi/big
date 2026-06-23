@@ -37,6 +37,9 @@ YEARS       = 5                  # PE 位階用近幾年分布
 MIN_DAYS    = 250               # PER 序列至少要有的天數
 REQ_SLEEP   = 0.3
 BANDS       = [10, 14, 18, 22, 26, 30]   # 本益比河流圖倍數
+MAX_RUNTIME_MIN = 25                       # 整輪上限(分):控 Actions 計費,漏抓的明日補
+RATE_WAIT_CAP   = 90                       # 撞額度最多睡幾秒(不睡到整點)
+MAX_RATE_RETRY  = 2                        # 撞額度短重試次數,仍失敗就跳過
 
 GMAIL_USER  = os.environ.get("GMAIL_USER", "")
 GMAIL_PASS  = os.environ.get("GMAIL_APP_PASSWORD", "")
@@ -237,10 +240,14 @@ def main():
     watch = load_watch()
     health = load_health()
     print(f"監看 {len(watch)} 檔,買入區間 = 自算 PE 位階 ≤ {BUY_PCTL}%;體檢覆蓋 {len(health)} 檔")
+    t0 = time.time()
     rows = []
     for i, sid in enumerate(watch, 1):
-        r = None
-        while True:                                    # 撞額度就睡到整點再續、不跳過此檔
+        if time.time() - t0 > MAX_RUNTIME_MIN * 60:    # 整輪超時 → 收尾(此監看每日跑,漏的明日補)
+            print(f"⏲ 已達 {MAX_RUNTIME_MIN} 分上限,本輪先收尾(剩 {len(watch)-i+1} 檔明日補)")
+            break
+        r = None; tries = 0
+        while True:
             try:
                 price = dl.taiwan_stock_daily(stock_id=sid, start_date=p_start)
                 fin   = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=f_start)
@@ -248,10 +255,12 @@ def main():
                 r = analyze(price, fin, dy)
                 break
             except Exception as e:
+                if _is_rate_limit(e) and tries < MAX_RATE_RETRY:
+                    tries += 1
+                    print(f"  ⏸ 疑似額度用罄 → 睡 {RATE_WAIT_CAP}s 短重試({tries}/{MAX_RATE_RETRY})")
+                    time.sleep(RATE_WAIT_CAP); continue
                 if _is_rate_limit(e):
-                    wait = seconds_to_next_hour()
-                    print(f"  ⏸ 疑似 FinMind 額度用罄 → 睡 {wait//60} 分到整點再續(不跳過 {sid})")
-                    time.sleep(wait); continue
+                    print(f"  ↷ {sid} 額度未恢復,本輪跳過"); r = None; break
                 print(f"  ! {sid} 失敗:{e}"); r = None; break
         if r:
             h = health.get(sid)

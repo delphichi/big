@@ -33,6 +33,7 @@ VAL = "data/台股財報估值.xlsx"
 HEA = "data/台股_體檢總表.xlsx"
 INF = "data/台股_拐點掃描.xlsx"
 WEIGHT = "data/twse_marketcap_weight.csv"
+OTC = "data/otc_marketcap.csv"
 OUT = "data/台股_0050納入預測.xlsx"
 
 # 已知 0050 成分股(2025 名單)— 用於 universe 識別
@@ -149,6 +150,23 @@ def main():
     spot = spot.rename(columns={"rank": "TWSE排名", "比重%": "大盤比重%"})
     spot["建議"] = "加入 PICKS 抓體檢"
 
+    # ---- OTC 轉上市觀察(上櫃大型股一旦轉上市即直接卡進 0050/TWSE 前段)----
+    # 上櫃股不在 0050 選股池;但「轉上市」是已知催化劑(信驊/環球晶等若上市即進前 50)。
+    # 用 TWSE 絕對市值門檻(億)比對上櫃市值,標出「轉上市即 0050 候選 / 即進 51-90」。
+    transfer = pd.DataFrame()
+    TWSE_R50_YI = float(rank[rank["rank"] == 50]["市值億"].iloc[0]) if "市值億" in rank.columns else None
+    TWSE_R90_YI = float(rank[rank["rank"] == 90]["市值億"].iloc[0]) if "市值億" in rank.columns else None
+    if os.path.exists(OTC) and TWSE_R50_YI:
+        otc = pd.read_csv(OTC, dtype={"代號": str})
+        big = otc[otc["市值億"] >= TWSE_R90_YI].copy()
+        def tier(m):
+            if m >= TWSE_R50_YI:  return "🔥轉上市即進0050(前50)"
+            return "⭐轉上市即進51-90"
+        big["轉上市定位"] = big["市值億"].apply(tier)
+        big["在我們PICKS"] = big["代號"].apply(lambda c: "✓" if c in (set(val["代號"].astype(str)) if not val.empty else set()) else "")
+        transfer = big[["rank", "代號", "名稱", "市值億", "轉上市定位", "在我們PICKS"]].rename(
+            columns={"rank": "OTC排名"})
+
     # ---- 輸出 ----
     out_cols = ["TWSE排名", "代號", "名稱", "大盤比重%", "納入潛力分", "評等", "品質總分",
                 "估值", "改善訊號數", "分級", "含金量", "市值(億)", "PER(自算)", "PE位階%",
@@ -167,6 +185,8 @@ def main():
                                      "是否0050", "評等", "估值"] if c in in_twse.columns]
         in_twse[in_twse_cols].to_excel(xw, sheet_name="universe在TWSE排名", index=False)
         rank.head(100).to_excel(xw, sheet_name="TWSE前100", index=False)
+        if not transfer.empty:
+            transfer.to_excel(xw, sheet_name="OTC轉上市觀察", index=False)
         thresh_df = pd.DataFrame([
             {"項目": "rank 50 (邊緣) 比重%", "值": THRESH_50},
             {"項目": "rank 60 比重%", "值": THRESH_60},
@@ -188,6 +208,9 @@ def main():
     if len(spot):
         print(f"\n候選B (blind spot) 全部 {len(spot)} 檔:\n"
               f"{spot[['TWSE排名','代號','名稱','大盤比重%']].to_string(index=False)}")
+    if not transfer.empty:
+        print(f"\nOTC 轉上市觀察 {len(transfer)} 檔(轉上市即可進 TWSE 前 90):\n"
+              f"{transfer.to_string(index=False)}")
     return cand_a
 
 

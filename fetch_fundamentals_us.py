@@ -1,27 +1,42 @@
 # -*- coding: utf-8 -*-
 """
-美股 財報 + 估值 + 體檢 (US Fundamentals & Health Check)
+美股 財報 + 估值 + 體檢 (FMP 版)
 =======================================================================
-讀 tickers_us.txt(美股觀察名單),用 yfinance 抓財報,套用與台股同一套
-「找好公司 ①~⑩ 框架 + 循環股例外」打分,輸出 data/美股體檢總表.xlsx。
+讀 tickers_us.txt,用 Financial Modeling Prep (FMP) 抓財報＋估值＋逐季毛利＋歷史 PE/PB,
+套用與台股對等的「找好公司 ①~⑩ 框架 + 循環股例外」打分,輸出 data/美股體檢總表.xlsx。
 
-★ 資料來源:yfinance(Yahoo Finance)。GitHub Actions runner 網路無限制可正常抓;
-  本地容器若 Yahoo 被 egress 白名單擋(query1/2.finance.yahoo.com),需先放行或改用 CI。
+★ 為何改用 FMP(取代 yfinance):
+   - yfinance 季報只有 ~4 季、無歷史 PE/PB 序列、無 ROIC、欄位常缺
+   - FMP 提供逐季財報、5+ 年歷史比率、ROIC/ROE,跟台股 FinMind 資料齊整度對等
+
+★ 需設 secret: FMP_API_KEY (https://site.financialmodelingprep.com/)
+   免費 250/day → 258 檔 × 5 endpoint = 1290,要 Starter 方案(300/min)。
+   無 key 則退回:跳過,提示使用者去設(免費註冊即得 key)。
+
+API endpoints:
+  /api/v3/income-statement/{sym}?period=annual    年度損益(取 5 年算 CAGR)
+  /api/v3/income-statement/{sym}?period=quarter   逐季損益(算逐季毛利+季 YoY)
+  /api/v3/cash-flow-statement/{sym}?period=annual 年度現金流(算含金量)
+  /api/v3/key-metrics-ttm/{sym}                   TTM:ROIC/ROE/EPS/含金量/股息
+  /api/v3/ratios/{sym}?period=annual              5 年 PER/PB → 算位階
 
 每檔算:
-  營收/EPS 年序列(近4年) → 營收CAGR、EPS 5y/近3y CAGR(成長引擎,不是只看營收)
-  毛利率/營益率/淨利率(最新年) 、ROE、ROIC(NOPAT/投入資本)
-  獲利含金量 = 營業現金流 ÷ 淨利(照妖鏡) 、負債比
-  估值:PER、PBR、殖利率、PEG;循環股偵測(EPS 曾負或大起大落 → 看 PBR)
-品質總分(0~100,估值另計) + 評等 A/B/C/D + 估值標籤 + 循環旗 + 主要漏洞。
-輸出分頁:體檢總表 / A級好公司 / A級+好價格 / 循環股。
+  營收/EPS 年序列 → 5y/3y CAGR、ROE、ROIC、毛利率、淨利率、含金量、PER、PBR
+  PE/PB 位階(5 年百分位,跟台股對等)
+  逐季毛利率(8 季,供 L2 拐點掃描算毛利拐頭)
+品質總分(0~100) + 評等 A/B/C/D + 估值標籤(用真位階) + 循環旗 + 主要漏洞
+輸出分頁:體檢總表 / A級好公司 / A級+好價格 / 循環股 / 逐季毛利率
 """
-import time
+import os, time
 import numpy as np
 import pandas as pd
+import requests
 
 WATCH = "tickers_us.txt"
-OUT = "data/美股體檢總表.xlsx"
+OUT   = "data/美股體檢總表.xlsx"
+KEY   = os.environ.get("FMP_API_KEY", "")
+BASE  = "https://financialmodelingprep.com/api/v3"
+RATE_SLEEP = 0.25                  # 每檔間隔(starter ~300/分)
 
 
 def load_watch():
@@ -33,20 +48,17 @@ def load_watch():
     return list(dict.fromkeys([t for t in out if t]))
 
 
-def _row(df, *names):
-    """從 yfinance 財報 DataFrame(index=科目, columns=年/季) 取某列,回傳依時間排序的數列。"""
-    if df is None or df.empty:
-        return []
-    for n in names:
-        if n in df.index:
-            s = df.loc[n].dropna()
-            s = s[sorted(s.index)]          # 由舊到新
-            return [float(x) for x in s.values]
-    return []
+def get(path):
+    if not KEY:
+        raise RuntimeError("未設 FMP_API_KEY")
+    r = requests.get(f"{BASE}{path}", params={"apikey": KEY}, timeout=20)
+    if r.status_code == 429:
+        raise RuntimeError("rate-limit")
+    r.raise_for_status()
+    return r.json()
 
 
 def cagr(v, n):
-    """取最後 n+1 個資料點算 n 段 CAGR(需頭尾皆正)。"""
     if len(v) >= n + 1 and v[-(n+1)] > 0 and v[-1] > 0:
         return (v[-1] / v[-(n+1)]) ** (1 / n) - 1
     return np.nan
@@ -57,84 +69,106 @@ def is_cyclical(v):
         return False
     if min(v) <= 0:
         return True
-    return (max(v) / min(v)) > 3
+    return any(v[i] < v[i-1] * 0.8 for i in range(1, len(v)))
+
+
+def historical_pctl(values, current):
+    """current 值在歷史 values 中的百分位 (0~100,越低越便宜)。"""
+    v = pd.Series([x for x in values if pd.notna(x) and x > 0])
+    if v.empty or pd.isna(current) or current <= 0:
+        return np.nan
+    return round(float((v <= current).mean() * 100))
 
 
 def fetch_one(sym):
-    import yfinance as yf
-    t = yf.Ticker(sym)
-    inc, bs, cf = t.income_stmt, t.balance_sheet, t.cashflow
-    info = {}
-    try:
-        info = t.info or {}
-    except Exception:
-        info = {}
+    inc_a  = get(f"/income-statement/{sym}?period=annual&limit=6")
+    inc_q  = get(f"/income-statement/{sym}?period=quarter&limit=8")
+    cf_a   = get(f"/cash-flow-statement/{sym}?period=annual&limit=6")
+    ttm    = get(f"/key-metrics-ttm/{sym}")
+    ratios = get(f"/ratios/{sym}?period=annual&limit=5")
+    prof   = get(f"/profile/{sym}")
 
-    rev = _row(inc, "Total Revenue")
-    gp = _row(inc, "Gross Profit")
-    op = _row(inc, "Operating Income", "Operating Income Or Loss")
-    ni = _row(inc, "Net Income", "Net Income Common Stockholders")
-    eps = _row(inc, "Diluted EPS", "Basic EPS")
-    ocf = _row(cf, "Operating Cash Flow", "Total Cash From Operating Activities")
-    ta = _row(bs, "Total Assets")
-    tl = _row(bs, "Total Liabilities Net Minority Interest", "Total Liab")
-    eq = _row(bs, "Stockholders Equity", "Total Stockholder Equity")
-    debt = _row(bs, "Total Debt")
+    # 年序列(由舊到新)
+    inc_a = list(reversed(inc_a))
+    cf_a  = list(reversed(cf_a))
+    ratios = list(reversed(ratios))
 
-    def last(x):
-        return x[-1] if x else np.nan
+    rev = [x.get("revenue") for x in inc_a if x.get("revenue") is not None]
+    gp  = [x.get("grossProfit") for x in inc_a if x.get("grossProfit") is not None]
+    ni  = [x.get("netIncome") for x in inc_a if x.get("netIncome") is not None]
+    eps = [x.get("epsdiluted") or x.get("eps") for x in inc_a]
+    eps = [x for x in eps if x is not None]
+    ocf = [x.get("operatingCashFlow") for x in cf_a if x.get("operatingCashFlow") is not None]
 
-    rev_l, ni_l = last(rev), last(ni)
-    r = {
+    # 逐季毛利(8 季,由舊到新)
+    inc_q = list(reversed(inc_q))
+    q_gm = []
+    for x in inc_q:
+        rv, g = x.get("revenue"), x.get("grossProfit")
+        if rv and g:
+            q_gm.append((x.get("date", "")[:10], round(g/rv*100, 2)))
+
+    ttm0 = ttm[0] if ttm else {}
+    prof0 = prof[0] if prof else {}
+
+    # 5 年歷史 PE/PB → 位階
+    hist_pe = [r.get("priceEarningsRatio") for r in ratios]
+    hist_pb = [r.get("priceToBookRatio") for r in ratios]
+    cur_pe = ttm0.get("peRatioTTM")
+    cur_pb = ttm0.get("pbRatioTTM")
+
+    rev_l = rev[-1] if rev else None
+    ni_l  = ni[-1] if ni else None
+    eps_l = eps[-1] if eps else None
+
+    return {
         "代號": sym,
-        "名稱": info.get("shortName", sym),
-        "產業": info.get("sector", ""),
-        "收盤": info.get("currentPrice") or info.get("regularMarketPrice"),
-        "市值(億美)": round(info.get("marketCap", 0) / 1e8, 1) if info.get("marketCap") else np.nan,
-        "營收CAGR%": round(cagr(rev, min(3, len(rev)-1)) * 100, 1) if len(rev) >= 2 else np.nan,
-        "毛利率%": round(last(gp) / rev_l * 100, 1) if gp and rev_l else (round(info.get("grossMargins", np.nan)*100, 1) if info.get("grossMargins") else np.nan),
-        "營益率%": round(last(op) / rev_l * 100, 1) if op and rev_l else (round(info.get("operatingMargins", np.nan)*100, 1) if info.get("operatingMargins") else np.nan),
-        "淨利率%": round(ni_l / rev_l * 100, 1) if ni_l and rev_l else (round(info.get("profitMargins", np.nan)*100, 1) if info.get("profitMargins") else np.nan),
+        "名稱": prof0.get("companyName", sym),
+        "產業": prof0.get("sector", ""),
+        "收盤": prof0.get("price"),
+        "市值(億美)": round(prof0.get("mktCap", 0) / 1e8, 1) if prof0.get("mktCap") else np.nan,
+        "營收CAGR%": round(cagr(rev, min(4, len(rev)-1)) * 100, 1) if len(rev) >= 2 else np.nan,
+        "毛利率%": round(gp[-1] / rev_l * 100, 1) if gp and rev_l else np.nan,
+        "營益率%": round(inc_a[-1].get("operatingIncomeRatio", 0) * 100, 1) if inc_a else np.nan,
+        "淨利率%": round(ni_l / rev_l * 100, 1) if ni_l and rev_l else np.nan,
         "EPS5y%": round(cagr(eps, min(4, len(eps)-1)) * 100, 1) if len(eps) >= 2 else np.nan,
-        "EPS3y%": round(cagr(eps, 3) * 100, 1) if len(eps) >= 4 else (round(cagr(eps, len(eps)-1)*100, 1) if len(eps) >= 2 else np.nan),
-        "ROE%": round(info.get("returnOnEquity", np.nan) * 100, 1) if info.get("returnOnEquity") else (round(ni_l / last(eq) * 100, 1) if ni_l and last(eq) else np.nan),
-        "含金量": round(last(ocf) / ni_l, 2) if ocf and ni_l and ni_l != 0 else np.nan,
-        "負債比%": round(last(tl) / last(ta) * 100, 1) if tl and last(ta) else np.nan,
-        "PER": round(info.get("trailingPE", np.nan), 1) if info.get("trailingPE") else np.nan,
-        "PBR": round(info.get("priceToBook", np.nan), 2) if info.get("priceToBook") else np.nan,
-        "PEG": round(info.get("trailingPegRatio", np.nan), 2) if info.get("trailingPegRatio") else np.nan,
-        "殖利率%": round(info.get("dividendYield", 0), 2) if info.get("dividendYield") else 0,
+        "EPS3y%": round(cagr(eps, 3) * 100, 1) if len(eps) >= 4 else np.nan,
+        "ROE%":   round(ttm0.get("roeTTM", 0) * 100, 1) if ttm0.get("roeTTM") else np.nan,
+        "ROIC%":  round(ttm0.get("roicTTM", 0) * 100, 1) if ttm0.get("roicTTM") else np.nan,
+        "含金量": round(ocf[-1] / ni_l, 2) if ocf and ni_l else np.nan,
+        "負債比%": round(ttm0.get("debtToAssetsTTM", 0) * 100, 1) if ttm0.get("debtToAssetsTTM") else np.nan,
+        "PER":  round(cur_pe, 1) if cur_pe else np.nan,
+        "PE位階": historical_pctl(hist_pe, cur_pe),
+        "PBR":  round(cur_pb, 2) if cur_pb else np.nan,
+        "PBR位階": historical_pctl(hist_pb, cur_pb),
+        "PEG":  round(ttm0.get("pegRatioTTM", np.nan), 2) if ttm0.get("pegRatioTTM") else np.nan,
+        "殖利率%": round(ttm0.get("dividendYieldTTM", 0) * 100, 2) if ttm0.get("dividendYieldTTM") else 0,
         "_eps_series": eps,
+        "_q_gm": q_gm,
     }
-    return r
 
 
-def valuation_tag(per, pbr):
-    pts = []
-    if pd.notna(per): pts.append(min(per / 0.4, 100) if per > 0 else 100)  # PER~40→100
-    xs = [x for x in pts if pd.notna(x)]
-    # 簡化:用 PER 絕對值分級(美股無歷史位階)
-    if pd.isna(per) or per <= 0:
-        return "—"
-    if per <= 15: return "🟢便宜"
-    if per <= 25: return "🟡合理"
-    if per <= 40: return "🟠偏貴"
+def valuation_tag(pe_pos, pb_pos):
+    """用 5 年位階(跟台股對等)分級。"""
+    xs = [x for x in (pe_pos, pb_pos) if pd.notna(x)]
+    if not xs: return "—"
+    m = np.mean(xs)
+    if m <= 30: return "🟢便宜"
+    if m <= 55: return "🟡合理"
+    if m <= 80: return "🟠偏貴"
     return "🔴過熱"
 
 
 def grade(r):
     s, leak = 0.0, []
     e5, e3 = r["EPS5y%"], r["EPS3y%"]
-    # ⑥EPS成長 20
     if pd.notna(e5) and pd.notna(e3):
         if e5 >= 10 and e3 >= 10: p = 20
         elif e5 > 0 and e3 > 0:   p = 12
         elif (e5 < 0) ^ (e3 < 0): p = 4; leak.append("EPS單期衰退")
         else:                     p = 0; leak.append("EPS連年衰退")
-    else:
-        p = 0; leak.append("EPS資料不足")
+    else: p = 0; leak.append("EPS資料不足")
     s += p
-    # ⑧含金量 20
     g = r["含金量"]
     if pd.isna(g):    p = 0; leak.append("無現金資料")
     elif g >= 1.2:    p = 20
@@ -143,7 +177,6 @@ def grade(r):
     elif g >= 0.5:    p = 4;  leak.append(f"含金量{g}弱")
     else:             p = 0;  leak.append(f"含金量{g}差")
     s += p
-    # ⑨ROE 14
     roe = r["ROE%"]
     if pd.isna(roe):  p = 0
     elif roe >= 20:   p = 14
@@ -152,21 +185,18 @@ def grade(r):
     elif roe >= 8:    p = 3
     else:             p = 0; leak.append(f"ROE{roe}低")
     s += p
-    # ②毛利率 10 / ④淨利率 10 (絕對值,美股無位階)
     gm = r["毛利率%"]
     p = 10 if (pd.notna(gm) and gm >= 40) else 6 if (pd.notna(gm) and gm >= 25) else 2 if pd.notna(gm) else 0
     s += p
     nm = r["淨利率%"]
     p = 10 if (pd.notna(nm) and nm >= 15) else 6 if (pd.notna(nm) and nm >= 8) else 2 if pd.notna(nm) else 0
     s += p
-    # ⑤營收成長 8
     rc = r["營收CAGR%"]
     if pd.isna(rc):   p = 0
     elif rc >= 10:    p = 8
     elif rc >= 0:     p = 5
     else:             p = 0; leak.append(f"營收萎縮{rc}%")
     s += p
-    # ⑦EPS不落後營收 8
     if pd.notna(e5) and pd.notna(rc) and rc > 0:
         p = 8 if e5 >= rc else 4 if e5 >= 0.5*rc else 0
         if p == 0: leak.append("EPS落後營收(稀釋/毛利漏)")
@@ -177,31 +207,39 @@ def grade(r):
 
 
 def main():
+    if not KEY:
+        print("⚠️ 未設 FMP_API_KEY 環境變數,腳本中止。")
+        print("   到 https://site.financialmodelingprep.com 免費註冊取得 API key,")
+        print("   設 GitHub Secret 名為 FMP_API_KEY,或本地 export FMP_API_KEY=...")
+        return
     watch = load_watch()
-    print(f"美股觀察名單 {len(watch)} 檔,開始抓取...")
+    print(f"美股觀察名單 {len(watch)} 檔,FMP 抓取...")
     rows = []
+    q_gm_all = {}
     for i, sym in enumerate(watch, 1):
         try:
             r = fetch_one(sym)
-            cyc = is_cyclical(r.pop("_eps_series"))
+            v_eps = r.pop("_eps_series")
+            q_gm  = r.pop("_q_gm")
+            cyc = is_cyclical(v_eps)
             sc, leak = grade(r)
             r["品質總分"] = sc
             r["評等"] = "A" if sc >= 80 else "B" if sc >= 65 else "C" if sc >= 50 else "D"
-            r["估值"] = valuation_tag(r["PER"], r["PBR"])
+            r["估值"] = valuation_tag(r["PE位階"], r["PBR位階"])
             r["循環股"] = "⚠️循環(看PBR)" if cyc else ""
             r["主要漏洞"] = leak
             rows.append(r)
-            print(f"[{i}/{len(watch)}] {sym} 分 {sc} {r['評等']}")
+            if q_gm: q_gm_all[f"{sym} {r['名稱'][:18]}"] = dict(q_gm)
+            print(f"[{i}/{len(watch)}] {sym:6s} 分 {sc} {r['評等']} {r['估值']}")
         except Exception as e:
             print(f"  ! {sym} 失敗:{e}")
-        time.sleep(0.3)
+        time.sleep(RATE_SLEEP)
 
     df = pd.DataFrame(rows).sort_values("品質總分", ascending=False)
-    cols = ["代號", "名稱", "產業", "評等", "品質總分", "EPS5y%", "EPS3y%", "ROE%", "含金量",
-            "毛利率%", "淨利率%", "營收CAGR%", "PER", "PBR", "PEG", "估值", "殖利率%",
-            "市值(億美)", "循環股", "主要漏洞"]
+    cols = ["代號", "名稱", "產業", "評等", "品質總分", "EPS5y%", "EPS3y%", "ROE%", "ROIC%", "含金量",
+            "毛利率%", "淨利率%", "營收CAGR%", "PER", "PE位階", "PBR", "PBR位階", "PEG",
+            "估值", "殖利率%", "市值(億美)", "循環股", "主要漏洞"]
     df = df[[c for c in cols if c in df.columns]]
-    import os
     os.makedirs("data", exist_ok=True)
     with pd.ExcelWriter(OUT, engine="openpyxl") as xw:
         df.to_excel(xw, sheet_name="體檢總表", index=False)
@@ -209,6 +247,10 @@ def main():
         a.to_excel(xw, sheet_name="A級好公司", index=False)
         a[a["估值"].isin(["🟢便宜", "🟡合理"])].to_excel(xw, sheet_name="A級+好價格", index=False)
         df[df["循環股"] != ""].to_excel(xw, sheet_name="循環股", index=False)
+        if q_gm_all:                                  # 逐季毛利率(供拐點掃描算毛利拐頭)
+            qg = pd.DataFrame({k: pd.Series(v) for k, v in q_gm_all.items()}).T
+            qg = qg.reindex(columns=sorted(qg.columns))
+            qg.to_excel(xw, sheet_name="逐季毛利率")
     print(f"完成 → {OUT}({len(df)} 檔)")
 
 

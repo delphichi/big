@@ -30,23 +30,44 @@ def main():
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
+    # 逐季毛利(若 FMP 版有)
+    try:
+        qm_df = pd.read_excel(SRC, "逐季毛利率", index_col=0)
+        qm = {}
+        for k in qm_df.index:
+            sym = str(k).split()[0]
+            qm[sym] = [x for x in qm_df.loc[k].tolist() if pd.notna(x)]
+        has_q = True
+    except Exception:
+        qm = {}; has_q = False
+
     rows = []
     for _, r in df.iterrows():
         cyclical = "循環" in str(r.get("循環股", ""))
-        # 改善訊號
-        A = pd.notna(r["毛利率%"]) and r["毛利率%"] >= 40       # 美股年報,用毛利水準代理拐頭
+        sym = r["代號"]
+        # A 毛利拐頭(優先用逐季,沒則退回絕對水準)
+        if has_q and sym in qm and len(qm[sym]) >= 5:
+            qs = qm[sym]; A = qs[-1] > np.mean(qs[-5:-1])
+            A_txt = "✓拐頭" if A else "✗"
+        elif pd.notna(r["毛利率%"]) and r["毛利率%"] >= 40:
+            A = True; A_txt = "✓水準"
+        else:
+            A = False; A_txt = "✗"
         B = pd.notna(r["營收CAGR%"]) and r["營收CAGR%"] >= 5
         C = pd.notna(r["EPS3y%"]) and pd.notna(r["EPS5y%"]) and r["EPS3y%"] > r["EPS5y%"] and r["EPS3y%"] > 0
         D = pd.notna(r["ROE%"]) and r["ROE%"] >= 15
         sig = sum([A, B, C, D])
 
         cash_ok = pd.notna(r["含金量"]) and r["含金量"] >= 0.8
+        # 估值仍低:優先用 5 年位階(FMP 版),沒則退回絕對倍數
+        pe_pos = pd.to_numeric(r.get("PE位階"), errors="coerce")
+        pb_pos = pd.to_numeric(r.get("PBR位階"), errors="coerce")
         if cyclical:
-            cheap = pd.notna(r["PBR"]) and r["PBR"] > 0 and r["PBR"] <= 2.5
-            v_metric = f"PBR {r['PBR']}"
+            cheap = pd.notna(pb_pos) and pb_pos <= 50 if pd.notna(pb_pos) else (pd.notna(r["PBR"]) and r["PBR"]>0 and r["PBR"]<=2.5)
+            v_metric = f"PBR位階{pb_pos}" if pd.notna(pb_pos) else f"PBR {r['PBR']}"
         else:
-            cheap = pd.notna(r["PER"]) and r["PER"] > 0 and r["PER"] <= 22
-            v_metric = f"PER {r['PER']}"
+            cheap = pd.notna(pe_pos) and pe_pos <= 50 if pd.notna(pe_pos) else (pd.notna(r["PER"]) and r["PER"]>0 and r["PER"]<=22)
+            v_metric = f"PE位階{pe_pos}" if pd.notna(pe_pos) else f"PER {r['PER']}"
         eps_not_dying = not (pd.notna(r["EPS5y%"]) and pd.notna(r["EPS3y%"]) and r["EPS5y%"] < 0 and r["EPS3y%"] < 0)
 
         candidate = cheap and cash_ok and eps_not_dying and sig >= 2
@@ -55,7 +76,7 @@ def main():
         rows.append({
             "代號": r["代號"], "名稱": r.get("名稱"), "產業": r.get("產業"),
             "分級": tier, "改善訊號數": sig,
-            "A毛利≥40": "✓" if A else "✗", "B營收CAGR≥5": "✓" if B else "✗",
+            "A毛利": A_txt, "B營收CAGR≥5": "✓" if B else "✗",
             "C_EPS加速": "✓" if C else "✗", "D_ROE≥15": "✓" if D else "✗",
             "EPS5y%": r["EPS5y%"], "EPS近3y%": r["EPS3y%"],
             "ROE%": r["ROE%"], "毛利率%": r["毛利率%"], "含金量": r["含金量"],

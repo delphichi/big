@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-0050 納入預測引擎 — 在 ETF 強迫買入前先卡位
+0050 + 富櫃50 納入預測引擎 — 在 ETF 強迫買入前先卡位
 =======================================================================
 邏輯:
-  0050 純市值前 50 規則(FTSE),被納入 = 被動資金強迫買;但等 FTSE 公告/媒體報導,
-  價格通常已先反映。本腳本在「市值排第 51-90 名 + 正在往上爬 + 基本面拐點 + 估值未爆」
-  的時點就先標記出來,搶在 ETF 公告前進場。
+  0050 (上市前 50) / 富櫃50 006201 (上櫃前 50) 都是純市值規則;被納入 = 被動資金
+  強迫買;等公告/媒體報導,價格已先反映。本腳本在「市值排第 51-90 名 + 拐點 +
+  估值未爆」時就先標記,搶在 ETF 公告前進場。
+  另加「OTC 轉上市觀察」:上櫃大型股若轉上市即可直接卡進 TWSE 前段。
 
 資料 :
   data/twse_marketcap_weight.csv — TWSE 全市場排名 + 市值佔大盤比重%
@@ -96,6 +97,21 @@ def main():
         base = base.merge(inf, on="代號", how="left")
     base["是否0050"] = base["代號"].apply(lambda c: "✓" if c in KNOWN_0050 else "")
 
+    # ---- OTC 富櫃50 (006201 元大富櫃50) 排名 ----
+    otc_rank = pd.DataFrame()
+    if os.path.exists(OTC):
+        otc_rank = pd.read_csv(OTC, dtype={"代號": str})
+        otc_lookup = dict(zip(otc_rank["代號"], otc_rank["rank"]))
+        otc_name_lookup = dict(zip(otc_rank["代號"], otc_rank["名稱"]))
+        otc_mcap_lookup = dict(zip(otc_rank["代號"], otc_rank["市值億"]))
+        base["OTC排名"] = base["代號"].map(otc_lookup)
+        base["OTC市值億"] = base["代號"].map(otc_mcap_lookup)
+        OTC_R50 = float(otc_rank[otc_rank["rank"] == 50]["市值億"].iloc[0])
+        OTC_R90 = float(otc_rank[otc_rank["rank"] == 90]["市值億"].iloc[0])
+        print(f"OTC 富櫃50 門檻:rank 50 = {OTC_R50}億 / rank 90 = {OTC_R90}億")
+    else:
+        OTC_R50 = OTC_R90 = None
+
     # ---- 候選 A:我們 universe 內 + rank 51-90 + 不在 0050 ----
     cand_a = base[
         base["TWSE排名"].notna() &
@@ -150,6 +166,59 @@ def main():
     spot = spot.rename(columns={"rank": "TWSE排名", "比重%": "大盤比重%"})
     spot["建議"] = "加入 PICKS 抓體檢"
 
+    # ---- 富櫃50 候選 A:我們已體檢 + OTC rank 51-90 ----
+    cand_otc_a = pd.DataFrame()
+    cand_otc_b = pd.DataFrame()
+    if not otc_rank.empty:
+        cand_otc_a = base[
+            base["OTC排名"].notna() &
+            (base["OTC排名"] >= 51) &
+            (base["OTC排名"] <= 90)
+        ].copy()
+
+        def score_otc(r):
+            s = 0
+            g = str(r.get("評等", ""))
+            if g == "A": s += 30
+            elif g == "B": s += 20
+            elif g == "C": s += 10
+            v = str(r.get("估值", ""))
+            if "便宜" in v: s += 25
+            elif "合理" in v: s += 18
+            elif "偏貴" in v: s += 5
+            ca = pd.to_numeric(r.get("含金量"), errors="coerce")
+            if pd.notna(ca):
+                if ca >= 1.2: s += 15
+                elif ca >= 1.0: s += 10
+                elif ca >= 0.8: s += 5
+            sig = pd.to_numeric(r.get("改善訊號數"), errors="coerce")
+            if pd.notna(sig):
+                s += int(sig) * 5
+            mo = pd.to_numeric(r.get("最新月營收年增%"), errors="coerce")
+            if pd.notna(mo):
+                if mo >= 30: s += 15
+                elif mo >= 15: s += 10
+                elif mo >= 0: s += 3
+            rk = r.get("OTC排名")
+            if pd.notna(rk):
+                if rk <= 55: s += 25
+                elif rk <= 65: s += 18
+                elif rk <= 75: s += 10
+                else: s += 3
+            return s
+
+        if len(cand_otc_a):
+            cand_otc_a["納入潛力分"] = cand_otc_a.apply(score_otc, axis=1)
+            cand_otc_a = cand_otc_a.sort_values(["納入潛力分", "OTC排名"], ascending=[False, True])
+
+        # 富櫃50 blind spot
+        our = set(val["代號"].astype(str)) if not val.empty else set()
+        cand_otc_b = otc_rank[
+            (otc_rank["rank"] >= 51) & (otc_rank["rank"] <= 90) &
+            (~otc_rank["代號"].isin(our))
+        ].copy().rename(columns={"rank": "OTC排名"})
+        cand_otc_b["建議"] = "加入 PICKS 抓體檢"
+
     # ---- OTC 轉上市觀察(上櫃大型股一旦轉上市即直接卡進 0050/TWSE 前段)----
     # 上櫃股不在 0050 選股池;但「轉上市」是已知催化劑(信驊/環球晶等若上市即進前 50)。
     # 用 TWSE 絕對市值門檻(億)比對上櫃市值,標出「轉上市即 0050 候選 / 即進 51-90」。
@@ -185,6 +254,18 @@ def main():
                                      "是否0050", "評等", "估值"] if c in in_twse.columns]
         in_twse[in_twse_cols].to_excel(xw, sheet_name="universe在TWSE排名", index=False)
         rank.head(100).to_excel(xw, sheet_name="TWSE前100", index=False)
+        if not cand_otc_a.empty:
+            otc_a_cols = ["OTC排名", "代號", "名稱", "OTC市值億", "納入潛力分", "評等",
+                          "品質總分", "估值", "改善訊號數", "分級", "含金量",
+                          "PER(自算)", "PE位階%", "PBR", "殖利率%",
+                          "最新月營收年增%", "循環股"]
+            otc_a_cols = [c for c in otc_a_cols if c in cand_otc_a.columns]
+            cand_otc_a[otc_a_cols].to_excel(xw, sheet_name="富櫃50候選A_已體檢", index=False)
+        if not cand_otc_b.empty:
+            cand_otc_b[["OTC排名", "代號", "名稱", "市值億", "建議"]].to_excel(
+                xw, sheet_name="富櫃50候選B_blind", index=False)
+        if not otc_rank.empty:
+            otc_rank.head(100).to_excel(xw, sheet_name="OTC前100", index=False)
         if not transfer.empty:
             transfer.to_excel(xw, sheet_name="OTC轉上市觀察", index=False)
         thresh_df = pd.DataFrame([
@@ -208,6 +289,15 @@ def main():
     if len(spot):
         print(f"\n候選B (blind spot) 全部 {len(spot)} 檔:\n"
               f"{spot[['TWSE排名','代號','名稱','大盤比重%']].to_string(index=False)}")
+    print(f"\n富櫃50 候選A (已體檢) {len(cand_otc_a)} 檔 / B (blind) {len(cand_otc_b)} 檔")
+    if not cand_otc_a.empty:
+        show = cand_otc_a.head(10)[[c for c in ["OTC排名","代號","名稱","OTC市值億",
+                                                  "納入潛力分","評等","估值"]
+                                      if c in cand_otc_a.columns]]
+        print(f"富櫃50 候選A Top 10:\n{show.to_string(index=False)}")
+    if not cand_otc_b.empty:
+        print(f"\n富櫃50 候選B (blind) Top 15:\n"
+              f"{cand_otc_b.head(15)[['OTC排名','代號','名稱','市值億']].to_string(index=False)}")
     if not transfer.empty:
         print(f"\nOTC 轉上市觀察 {len(transfer)} 檔(轉上市即可進 TWSE 前 90):\n"
               f"{transfer.to_string(index=False)}")

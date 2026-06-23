@@ -38,12 +38,13 @@ def eps_cagr(eps_df, code):
 
 
 def is_cyclical(v):
-    """逐年EPS曾為負 或 大起大落(最大/最小 > 3倍) → 循環嫌疑。"""
+    """循環股 = 有真正的『衰退年』(EPS曾≤0,或某年YoY跌>20%),代表獲利上下震盪。
+    純單調成長(年年往上,即使5年漲數倍)不算循環 — 那是結構性成長股。"""
     if len(v) < 3:
         return False
     if min(v) <= 0:
         return True
-    return (max(v) / min(v)) > 3
+    return any(v[i] < v[i-1] * 0.8 for i in range(1, len(v)))   # 某年 EPS 較前年跌逾20%
 
 
 def grade_quality(r):

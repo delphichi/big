@@ -202,8 +202,12 @@ def classify(r, h):
         return ""
     if not pe_buy:                                 # 非循環:沒落入PE買區就不是買點
         return ""
-    ok = (grade in ("A", "B")) and (pd.notna(g) and g >= 1.0) and (pd.notna(e3) and e3 > 0)
-    return "⭐優質買點" if ok else "⚠️便宜陷阱"
+    cash_ok = (pd.notna(g) and g >= 1.0) and (pd.notna(e3) and e3 > 0)
+    if grade == "A" and cash_ok:
+        return "⭐A級買點"                          # 便宜+頂級品質+真成長
+    if grade == "B" and cash_ok:
+        return "✅B級買點"                          # 便宜+合格(成長普通,偏防禦/領息)
+    return "⚠️便宜陷阱"
 
 
 # ---------- Email ----------
@@ -267,9 +271,11 @@ def main():
         print("無有效資料"); return
     df = pd.DataFrame(rows).drop(columns="_buy").sort_values("PE位階%")
 
-    star = df[df["訊號"] == "⭐優質買點"]
+    star = df[df["訊號"] == "⭐A級買點"]
+    bgrade = df[df["訊號"] == "✅B級買點"]
     trap = df[df["訊號"] == "⚠️便宜陷阱"]
     cyc  = df[df["訊號"] == "🔄循環買點(PBR)"]
+    fin  = df[df["訊號"] == "🏦金融(看PBR/殖利率)"]
     unrated = df[df["訊號"] == "❔未評(無體檢)"]
 
     view = ["代號", "名稱", "訊號", "評等", "收盤", "PER現(自算)", "PE位階%", "PBR位階",
@@ -279,24 +285,28 @@ def main():
 
     os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
     with pd.ExcelWriter(OUTPUT, engine="openpyxl") as xw:
-        v(star).to_excel(xw, sheet_name="今日優質買點", index=False)
-        v(trap).to_excel(xw, sheet_name="便宜但陷阱", index=False)
+        v(star).to_excel(xw, sheet_name="A級買點", index=False)
+        v(bgrade).to_excel(xw, sheet_name="B級買點", index=False)
         v(cyc).to_excel(xw, sheet_name="循環股買點(看PBR)", index=False)
+        v(fin).to_excel(xw, sheet_name="金融(看PBR殖利率)", index=False)
+        v(trap).to_excel(xw, sheet_name="便宜但陷阱", index=False)
         df.to_excel(xw, sheet_name="全部監看", index=False)
 
     today = datetime.now().strftime("%Y-%m-%d")
-    print(f"\n⭐優質買點 {len(star)} / ⚠️便宜陷阱 {len(trap)} / 🔄循環買點 {len(cyc)} / ❔未評 {len(unrated)}")
-    # 只寄『優質買點』(體檢加持後的真訊號);附帶陷阱/循環檔數摘要
-    if len(star):
+    print(f"\n⭐A級買點 {len(star)} / ✅B級買點 {len(bgrade)} / 🔄循環 {len(cyc)} / "
+          f"🏦金融 {len(fin)} / ⚠️陷阱 {len(trap)} / ❔未評 {len(unrated)}")
+    # 寄 A 級 + B 級買點(真訊號,分級呈現);其餘只附摘要
+    if len(star) or len(bgrade):
         cols = ["代號", "名稱", "評等", "收盤", "PER現(自算)", "PE位階%", "含金量", "EPS近3y%", "買入價(P20×EPS)", "殖利率%"]
-        html = (f"<h3>{today} ⭐優質買點 {len(star)} 檔"
-                f"(PE位階≤{BUY_PCTL}% + 體檢A/B + 含金量≥1 + EPS近3年正成長)</h3>"
-                + star[cols].to_html(index=False, border=1)
-                + f"<p>另有 ⚠️便宜陷阱 {len(trap)} 檔(便宜有原因,已過濾)、"
-                  f"🔄循環股買點 {len(cyc)} 檔(看PBR),詳見 {OUTPUT}。</p>")
-        send_email(f"【優質買點】{today} {len(star)} 檔(體檢加持)", html)
+        html = f"<h3>{today} 買點訊號(體檢加持)</h3>"
+        if len(star):
+            html += f"<h4>⭐ A級買點 {len(star)} 檔(便宜+頂級品質+真成長)</h4>" + star[cols].to_html(index=False, border=1)
+        if len(bgrade):
+            html += f"<h4>✅ B級買點 {len(bgrade)} 檔(便宜+合格,成長普通偏防禦/領息)</h4>" + bgrade[cols].to_html(index=False, border=1)
+        html += (f"<p>另:🔄循環買點 {len(cyc)}、🏦金融 {len(fin)}、⚠️便宜陷阱 {len(trap)}(已過濾),詳見 {OUTPUT}。</p>")
+        send_email(f"【買點】{today} A級{len(star)}/B級{len(bgrade)} 檔(體檢加持)", html)
     else:
-        print("今日無⭐優質買點,不寄信")
+        print("今日無 A/B 級買點,不寄信")
 
     print(f"\n完成 → {OUTPUT};今日買入區間 {len(buy)} 檔 / 監看 {len(allv)} 檔")
     if len(buy):

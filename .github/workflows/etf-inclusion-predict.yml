@@ -1,0 +1,47 @@
+name: 0050 納入預測
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install FinMind pandas numpy openpyxl requests lxml
+
+      - name: 回填市值(股本 × 收盤)
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python backfill_market_cap.py
+
+      - name: 重跑 體檢總表
+        run: python stock_health_check.py || echo "health check 失敗,繼續"
+
+      - name: 重跑 拐點掃描
+        run: python stock_inflection_scan.py || echo "拐點掃描失敗,繼續"
+
+      - name: 跑 0050 納入預測
+        run: python stock_etf_inclusion_predict.py
+
+      - name: Commit
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ || true
+          if git diff --staged --quiet; then echo "無變更"; exit 0; fi
+          git commit -m "data: 0050 納入預測 $(date -u +%Y%m%d)"
+          for i in 1 2 3 4 5; do
+            git fetch origin main -q && git merge origin/main -X ours --no-edit >/dev/null 2>&1
+            git push && { echo pushed; exit 0; }
+            sleep 6
+          done

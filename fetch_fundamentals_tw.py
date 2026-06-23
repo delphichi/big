@@ -212,6 +212,7 @@ def performance(raw):
     eq   = pick(bal, "Equity", "TotalEquity", "EquityAttributableToOwnersOfParent")
     ca   = pick(bal, "CurrentAssets")
     cl   = pick(bal, "CurrentLiabilities")
+    cap  = pick(bal, "CommonStocks", "CommonStock", "CapitalStock", "Capital", "ShareCapital")
 
     # 現金流量表為 YTD 累計 → 先轉單季,之後加總近四季才正確
     ocf  = decum(pick(cf, "CashFlowsFromOperatingActivities",
@@ -236,6 +237,7 @@ def performance(raw):
     m["_OCF"]       = ocf
     m["營業現金流(億)"] = (ocf / 1e8).round(1)
     m["自由現金流(億)"] = ((ocf + capex) / 1e8).round(1)   # capex 在現金流量表多為負值
+    m["_股本"]       = cap                                # 台股股本(元),÷10 為流通股數
     return m
 
 
@@ -367,6 +369,12 @@ def summary_row(sid, name, raw):
             row["收盤"]      = round(float(ps["close"].iloc[-1]), 1)
             row["PER(自算)"] = round(float(s.iloc[-1]), 2)
             row["PE位階%"]   = round(float((s <= s.iloc[-1]).mean() * 100))
+    # 市值(億):股本 ÷ 10 = 流通股數;× 收盤 = 市值;÷ 1e8 換算億
+    if not perf.empty and "_股本" in perf.columns and row.get("收盤") is not None:
+        cap_ser = perf["_股本"].dropna()
+        if len(cap_ser):
+            shares = float(cap_ser.iloc[-1]) / 10.0
+            row["市值(億)"] = round(shares * float(row["收盤"]) / 1e8, 1)
     per = raw.get("PER")
     if per is not None and not per.empty:
         p = per.sort_values("date").iloc[-1]
@@ -424,7 +432,7 @@ def build_output(namemap):
             "5年營收CAGR%", "5年平均淨利率%", "5年平均ROE%",
             "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%",
             "負債比%", "流動比%", "獲利含金量", "近四季自由現金流(億)",
-            "收盤", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%"]
+            "收盤", "市值(億)", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%"]
     df = df[[c for c in cols if c in df.columns]]
     for col in df.columns:
         if col not in ("代號", "名稱", "金融", "最新季"):

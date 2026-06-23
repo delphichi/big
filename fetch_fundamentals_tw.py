@@ -2,7 +2,7 @@
 """
 台股 財報 + 估值 表 (TW Fundamentals & Valuation)
 =======================================================================
-名單 = 月營收年增掃描中表現最好的一批標的(共 72 檔,含金融股,見 PICKS)。
+名單 = 月營收年增掃描中表現最好的一批標的(共 247 檔,含金融股,見 PICKS)。
 不滿 5 年資料者(新上市/興櫃轉上市)會自動跳過 5 年趨勢(CAGR / 5年均 ROE / 淨利率留白),
 仍照常輸出近四季績效與估值(PER/PBR/殖利率),不影響整體跑批。
 一次抓最近 ~5 年的三大表 + 股價 + 每日 PER/PBR/殖利率,算出 5 年趨勢、近四季經營績效、
@@ -31,7 +31,7 @@
   成長     → 最新月營收年增%
 
 ★ 大量抓取務必設環境變數 FINMIND_TOKEN(免費約 300 次/hr、設 token 約 600 次/hr);
-  72 檔 × 6 dataset ≈ 432 次呼叫 → 多數情況一個整點內可跑完,仍用 token 並靠斷點續跑保險。
+  247 檔 × 6 dataset ≈ 1482 次呼叫 → 跨多個整點,務必設 token + MAX_RUNTIME_MIN 控時。
   斷點續跑:每檔算完即存 data/_tw_val_cache/{代號}.json,並每 10 檔重建一次 Excel;
   撞額度會「睡到整點再續」,被取消/逾時也不丟進度——再跑一次會自動跳過已完成、接著抓。
 """
@@ -102,6 +102,10 @@ PICKS = [
     "2301","8081",
     # 0050 2026Q2 納入4檔(回測拐點是否提前出現)
     "8046","3443","3665","4958",
+    # 0050 + 富櫃50 blind spot 補抓(依 stock_etf_inclusion_predict 輸出補)
+    "3661","3533","3034","1590","2207","2356","6415","6139","1605",
+    "3227","5371","8086","5351","4123","6613","3357","5439","5425","6640",
+    "5347","3529","8069","6147",
 ]
 
 # 金融股(銀行/金控/保險/券商):營收/利潤率口徑不適用,輸出會標 🏦(估值 PER/PBR/殖利率仍有效)。
@@ -248,6 +252,7 @@ def performance(raw):
     eq   = pick(bal, "Equity", "TotalEquity", "EquityAttributableToOwnersOfParent")
     ca   = pick(bal, "CurrentAssets")
     cl   = pick(bal, "CurrentLiabilities")
+    cap  = pick(bal, "CommonStocks", "CommonStock", "CapitalStock", "Capital", "ShareCapital")
 
     # 現金流量表為 YTD 累計 → 先轉單季,之後加總近四季才正確
     ocf  = decum(pick(cf, "CashFlowsFromOperatingActivities",
@@ -272,6 +277,7 @@ def performance(raw):
     m["_OCF"]       = ocf
     m["營業現金流(億)"] = (ocf / 1e8).round(1)
     m["自由現金流(億)"] = ((ocf + capex) / 1e8).round(1)   # capex 在現金流量表多為負值
+    m["_股本"]       = cap                                # 台股股本(元),÷10 為流通股數
     return m
 
 
@@ -403,6 +409,12 @@ def summary_row(sid, name, raw):
             row["收盤"]      = round(float(ps["close"].iloc[-1]), 1)
             row["PER(自算)"] = round(float(s.iloc[-1]), 2)
             row["PE位階%"]   = round(float((s <= s.iloc[-1]).mean() * 100))
+    # 市值(億):股本 ÷ 10 = 流通股數;× 收盤 = 市值;÷ 1e8 換算億
+    if not perf.empty and "_股本" in perf.columns and row.get("收盤") is not None:
+        cap_ser = perf["_股本"].dropna()
+        if len(cap_ser):
+            shares = float(cap_ser.iloc[-1]) / 10.0
+            row["市值(億)"] = round(shares * float(row["收盤"]) / 1e8, 1)
     per = raw.get("PER")
     if per is not None and not per.empty:
         p = per.sort_values("date").iloc[-1]
@@ -461,7 +473,7 @@ def build_output(namemap):
             "5年營收CAGR%", "5年平均淨利率%", "5年平均ROE%",
             "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%",
             "負債比%", "流動比%", "獲利含金量", "近四季自由現金流(億)",
-            "收盤", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%"]
+            "收盤", "市值(億)", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%"]
     df = df[[c for c in cols if c in df.columns]]
     for col in df.columns:
         if col not in ("代號", "名稱", "金融", "最新季"):

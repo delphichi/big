@@ -9,7 +9,10 @@
     PER = 收盤價 ÷ 近四季EPS
     近四季EPS = 最近 4 個單季 EPS 加總(FinMind 財報,已驗證準確)
 
-買入區間:今日「自算 PER」≤ 該股近5年「自算 PER」的 P20(PE 位階 ≤ BUY_PCTL%)。
+買入區間(現在PE):今日「自算 PER」≤ 該股近5年「自算 PER」的 P20(PE 位階 ≤ BUY_PCTL%)。
+買入區間(未來PE):用「明年EPS=近四季EPS×(1+近3年成長率,cap60%)」算 Forward PE,
+                  看它落在近5年自算 PE 分佈第幾分位 ≤ P20 → 🔵未來低位(成長股提前卡位)。
+                  成長率取自體檢總表「成長率g%」;循環股不計 forward(獲利震盪外推無意義)。
 同時輸出本益比河流圖:目前近四季EPS × {10,14,18,22,26,30} 倍對應價格,看股價落在哪一帶。
 
 資料來源(每檔 3 次呼叫,仍輕):
@@ -123,7 +126,7 @@ def ttm_eps(fin):
         rows.append((qend + timedelta(days=lag), float(v)))
     return pd.DataFrame(rows, columns=["生效日", "近四季EPS"]).sort_values("生效日")
 
-def analyze(price_df, fin_df, dy):
+def analyze(price_df, fin_df, dy, g=None):
     if price_df is None or price_df.empty or "close" not in price_df.columns:
         return None
     tt = ttm_eps(fin_df)
@@ -161,6 +164,19 @@ def analyze(price_df, fin_df, dy):
         "最新日": str(m["date"].iloc[-1]),
         "_buy": rank <= BUY_PCTL,
     }
+    # Forward PE:用「明年EPS = 近四季EPS×(1+g)」重算,並看它落在歷史 PER 分佈第幾分位。
+    # 成長股 forward PE 位階會比現在低 → 「用成長修正後,現價其實在歷史低檔」= 提前卡位訊號。
+    if g is not None and pd.notna(g) and eps_ttm > 0:
+        gg = max(-30.0, min(60.0, float(g)))             # cap 防外推爆衝(同體檢口徑)
+        fwd_eps = eps_ttm * (1 + gg / 100)
+        if fwd_eps > 0:
+            fwd_pe = close / fwd_eps
+            fwd_rank = round(float((s <= fwd_pe).mean() * 100))   # forward PE 在歷史 TTM-PE 分佈的位階
+            out["成長率g%"] = round(gg, 1)
+            out["預估明年EPS"] = round(fwd_eps, 2)
+            out["ForwardPE現"] = round(fwd_pe, 2)
+            out["ForwardPE位階%"] = fwd_rank
+            out["_fwd_buy"] = fwd_rank <= BUY_PCTL
     for x in BANDS:                                  # 本益比河流圖各倍數對應價
         out[f"{x}x"] = round(eps_ttm * x, 1)
     return out
@@ -182,6 +198,7 @@ def load_health():
             "含金量": pd.to_numeric(r.get("含金量"), errors="coerce"),
             "EPS3y": pd.to_numeric(r.get("EPS近3y%"), errors="coerce"),
             "PBR位階": pd.to_numeric(r.get("PBR位階"), errors="coerce"),
+            "成長率g": pd.to_numeric(r.get("成長率g%"), errors="coerce"),
             "循環": "循環" in str(r.get("循環股", "")),
         }
     return out
@@ -247,12 +264,15 @@ def main():
             print(f"⏲ 已達 {MAX_RUNTIME_MIN} 分上限,本輪先收尾(剩 {len(watch)-i+1} 檔明日補)")
             break
         r = None; tries = 0
+        h0 = health.get(sid)
+        # 循環股不外推 forward(獲利震盪);非循環才帶成長率算 Forward PE
+        g0 = None if (h0 and h0.get("循環")) else (h0.get("成長率g") if h0 else None)
         while True:
             try:
                 price = dl.taiwan_stock_daily(stock_id=sid, start_date=p_start)
                 fin   = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=f_start)
                 dy    = get_dividend_yield(dl, sid, p_start)
-                r = analyze(price, fin, dy)
+                r = analyze(price, fin, dy, g=g0)
                 break
             except Exception as e:
                 if _is_rate_limit(e) and tries < MAX_RATE_RETRY:
@@ -267,13 +287,17 @@ def main():
             sig = classify(r, h)
             row = {"代號": sid, "名稱": nm.get(sid, sid), **r}
             row["訊號"] = sig
+            # 未來低位旗標:用明年EPS算的 PE 也落在歷史低檔(成長修正後便宜)
+            fwd_rank = r.get("ForwardPE位階%")
+            row["未來訊號"] = ("🔵未來低位" if r.get("_fwd_buy") else "") if fwd_rank is not None else ""
             row["評等"] = h["評等"] if h else ""
             row["含金量"] = h["含金量"] if h else None
             row["EPS近3y%"] = h["EPS3y"] if h else None
             row["PBR位階"] = h["PBR位階"] if h else None
             row["循環"] = "⚠️" if (h and h["循環"]) else ""
             rows.append(row)
-            print(f"[{i}/{len(watch)}] {sid} {nm.get(sid,sid):6s} 位階{r['PE位階%']:>3} {sig or ''}")
+            fw = f" {row['未來訊號']}" if row["未來訊號"] else ""
+            print(f"[{i}/{len(watch)}] {sid} {nm.get(sid,sid):6s} 位階{r['PE位階%']:>3} {sig or ''}{fw}")
         time.sleep(REQ_SLEEP)
 
     if not rows:
@@ -287,7 +311,12 @@ def main():
     fin  = df[df["訊號"] == "🏦金融(看PBR/殖利率)"]
     unrated = df[df["訊號"] == "❔未評(無體檢)"]
 
-    view = ["代號", "名稱", "訊號", "評等", "收盤", "PER現(自算)", "PE位階%", "PBR位階",
+    # 未來低位:現在PE 還沒到買區,但用明年EPS算的 PE 已落歷史低檔(成長股提前卡位)
+    fwd_only = df[(df.get("未來訊號") == "🔵未來低位") & (~df["訊號"].isin(["⭐A級買點", "✅B級買點"]))
+                  & df["評等"].isin(["A", "B"])] if "未來訊號" in df.columns else pd.DataFrame()
+
+    view = ["代號", "名稱", "訊號", "未來訊號", "評等", "收盤", "PER現(自算)", "PE位階%",
+            "成長率g%", "預估明年EPS", "ForwardPE現", "ForwardPE位階%", "PBR位階",
             "含金量", "EPS近3y%", "循環", "買入價(P20×EPS)", "距買入區間%", "殖利率%"]
     def v(d):
         return d[[c for c in view if c in d.columns]]
@@ -296,30 +325,37 @@ def main():
     with pd.ExcelWriter(OUTPUT, engine="openpyxl") as xw:
         v(star).to_excel(xw, sheet_name="A級買點", index=False)
         v(bgrade).to_excel(xw, sheet_name="B級買點", index=False)
+        if len(fwd_only):
+            v(fwd_only).to_excel(xw, sheet_name="未來PE低位(成長卡位)", index=False)
         v(cyc).to_excel(xw, sheet_name="循環股買點(看PBR)", index=False)
         v(fin).to_excel(xw, sheet_name="金融(看PBR殖利率)", index=False)
         v(trap).to_excel(xw, sheet_name="便宜但陷阱", index=False)
         df.to_excel(xw, sheet_name="全部監看", index=False)
 
     today = datetime.now().strftime("%Y-%m-%d")
-    print(f"\n⭐A級買點 {len(star)} / ✅B級買點 {len(bgrade)} / 🔄循環 {len(cyc)} / "
-          f"🏦金融 {len(fin)} / ⚠️陷阱 {len(trap)} / ❔未評 {len(unrated)}")
-    # 寄 A 級 + B 級買點(真訊號,分級呈現);其餘只附摘要
-    if len(star) or len(bgrade):
+    print(f"\n⭐A級買點 {len(star)} / ✅B級買點 {len(bgrade)} / 🔵未來低位 {len(fwd_only)} / "
+          f"🔄循環 {len(cyc)} / 🏦金融 {len(fin)} / ⚠️陷阱 {len(trap)} / ❔未評 {len(unrated)}")
+    # 寄信:A級 + B級買點(現在PE低位) + 未來PE低位(成長卡位);三類都算真訊號
+    if len(star) or len(bgrade) or len(fwd_only):
         cols = ["代號", "名稱", "評等", "收盤", "PER現(自算)", "PE位階%", "含金量", "EPS近3y%", "買入價(P20×EPS)", "殖利率%"]
+        fcols = ["代號", "名稱", "評等", "收盤", "PER現(自算)", "PE位階%", "成長率g%",
+                 "ForwardPE現", "ForwardPE位階%", "含金量", "殖利率%"]
         html = f"<h3>{today} 買點訊號(體檢加持)</h3>"
         if len(star):
-            html += f"<h4>⭐ A級買點 {len(star)} 檔(便宜+頂級品質+真成長)</h4>" + star[cols].to_html(index=False, border=1)
+            html += f"<h4>⭐ A級買點 {len(star)} 檔(現在PE便宜+頂級品質+真成長)</h4>" + star[cols].to_html(index=False, border=1)
         if len(bgrade):
-            html += f"<h4>✅ B級買點 {len(bgrade)} 檔(便宜+合格,成長普通偏防禦/領息)</h4>" + bgrade[cols].to_html(index=False, border=1)
-        html += (f"<p>另:🔄循環買點 {len(cyc)}、🏦金融 {len(fin)}、⚠️便宜陷阱 {len(trap)}(已過濾),詳見 {OUTPUT}。</p>")
-        send_email(f"【買點】{today} A級{len(star)}/B級{len(bgrade)} 檔(體檢加持)", html)
+            html += f"<h4>✅ B級買點 {len(bgrade)} 檔(現在PE便宜+合格,偏防禦/領息)</h4>" + bgrade[cols].to_html(index=False, border=1)
+        if len(fwd_only):
+            html += (f"<h4>🔵 未來PE低位 {len(fwd_only)} 檔(現在PE還沒到買區,但用<b>明年EPS</b>算的 PE 已落歷史低檔=成長提前卡位)</h4>"
+                     + fwd_only[[c for c in fcols if c in fwd_only.columns]].to_html(index=False, border=1))
+        html += (f"<p>另:🔄循環買點 {len(cyc)}、🏦金融 {len(fin)}、⚠️便宜陷阱 {len(trap)}(已過濾),詳見 {OUTPUT}。</p>"
+                 f"<p style='color:#888'>說明:未來PE = 收盤 ÷ 明年EPS(明年EPS=近四季EPS×(1+近3年成長率,cap60%));"
+                 f"位階 = 該值落在近5年自算PE分佈的百分位。循環股不計 forward。</p>")
+        send_email(f"【買點】{today} A{len(star)}/B{len(bgrade)}/未來{len(fwd_only)} 檔(現在+未來PE)", html)
     else:
-        print("今日無 A/B 級買點,不寄信")
+        print("今日無 A/B 級或未來低位買點,不寄信")
 
-    print(f"\n完成 → {OUTPUT};今日買入區間 {len(buy)} 檔 / 監看 {len(allv)} 檔")
-    if len(buy):
-        print(buy[["代號", "名稱", "收盤", "PER現(自算)", "PE買入門檻(P20)", "PE位階%"]].to_string(index=False))
+    print(f"\n完成 → {OUTPUT};監看 {len(df)} 檔")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,9 @@ name: 0050 納入預測
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["台股 財報估值"]
+    types: [completed]
 
 permissions:
   contents: write

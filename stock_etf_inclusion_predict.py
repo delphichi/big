@@ -8,23 +8,22 @@
   的時點就先標記出來,搶在 ETF 公告前進場。
 
 資料 :
-  data/twse_top100_marketcap.csv  — 全市場前 100 大實際市值排名(人工 anchor,
-                                    供精確估算第 50 名門檻;若無則退回 anchor 估算)
+  data/twse_marketcap_weight.csv — TWSE 全市場排名 + 市值佔大盤比重%
+                                    (上市股票口徑,正是 0050 的選股池;
+                                     上櫃股如 5274 信驊 已自動排除)
   data/台股財報估值.xlsx [財報估值比較] — 我們 universe 的市值/PER/PBR/體質
   data/台股_體檢總表.xlsx [體檢總表]     — 評等/品質總分/估值/含金量/循環
   data/台股_拐點掃描.xlsx [全部訊號]     — 改善訊號數/分級(optional)
 
-評分流程:
-  1. 從 twse_top100 取第 50 名市值當實際 0050 門檻
-  2. 候選 = 排名 51-90(市值在 [第90名, 第50名*1.05] 區)且不在 0050 內
-  3. 加分:評等 A/B + 估值便宜或合理 + 拐點訊號 ≥ 2 + 含金量 ≥ 1.0
-  4. 兩種候選來源並列:
-     (a) 我們 universe 內 → 已有完整體檢,可直接評分
-     (b) 不在我們 universe → blind spot,標記為「該加進 PICKS」
-  5. 輸出 5 分頁:候選A(已體檢) / 候選B(blind spot) / universe市值排名 /
-                  0050 anchor / 門檻說明
+關鍵門檻(2026/06 snapshot):
+  rank 50 = 6770 力積電 0.2577% ← 0050 邊緣
+  rank 90 = 1605 華新   0.1181% ← 候選下限
 
-輸出:data/台股_0050納入預測.xlsx
+評分流程:
+  1. 把全市場 rank 100 對齊到我們 universe(用代號 join)
+  2. 候選 A = 我們已體檢 + rank 51-90(可直接給體檢/拐點/估值評分)
+  3. 候選 B = blind spot — rank 51-90 但不在我們 PICKS → 該加進去抓
+  4. 加分:評等 A/B + 估值便宜或合理 + 拐點訊號 ≥ 2 + 含金量 ≥ 1.0
 """
 import os
 import pandas as pd
@@ -33,53 +32,42 @@ import numpy as np
 VAL = "data/台股財報估值.xlsx"
 HEA = "data/台股_體檢總表.xlsx"
 INF = "data/台股_拐點掃描.xlsx"
-TOP = "data/twse_top100_marketcap.csv"
+WEIGHT = "data/twse_marketcap_weight.csv"
 OUT = "data/台股_0050納入預測.xlsx"
 
-# 已知 0050 成分股(2025 名單)— 用於 universe 識別,不再用作門檻估算 anchor
+# 已知 0050 成分股(2025 名單)— 用於 universe 識別
 KNOWN_0050 = {
     "2330", "2454", "2317", "2308", "3711", "2382", "2412", "3045", "2912",
     "3008", "6505", "2207", "2379", "2395", "2301", "2002", "1303", "1301",
     "2891", "2882", "2881", "2884", "2885", "2880", "2883", "2887", "2890",
-    "2886", "2892", "5880", "2801", "2885", "5871",
+    "2886", "2892", "5880", "2801", "5871",
     # 2026Q2 新納入
     "8046", "3443", "3665", "4958",
 }
 
 
 def main():
+    if not os.path.exists(WEIGHT):
+        print(f"找不到 {WEIGHT},無法做排名預測"); return
+    rank = pd.read_csv(WEIGHT, dtype={"代號": str})
+    THRESH_50 = float(rank[rank["rank"] == 50]["比重%"].iloc[0])
+    THRESH_90 = float(rank[rank["rank"] == 90]["比重%"].iloc[0])
+    THRESH_60 = float(rank[rank["rank"] == 60]["比重%"].iloc[0])
+    print(f"TWSE 真實門檻:rank 50 = {THRESH_50}% / 60 = {THRESH_60}% / 90 = {THRESH_90}%")
+    top90 = set(rank[rank["rank"] <= 90]["代號"])
+    rank_lookup = dict(zip(rank["代號"], rank["rank"]))
+    weight_lookup = dict(zip(rank["代號"], rank["比重%"]))
+    name_lookup = dict(zip(rank["代號"], rank["名稱"]))
+
     if not os.path.exists(VAL):
-        print(f"找不到 {VAL},請先跑 fetch_fundamentals_tw + backfill_market_cap"); return
-    val = pd.read_excel(VAL, "財報估值比較")
-    val["代號"] = val["代號"].astype(str)
-    for c in ["市值(億)", "收盤", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%"]:
-        if c in val.columns:
-            val[c] = pd.to_numeric(val[c], errors="coerce")
-
-    # ---- 真實門檻:讀 twse_top100 ----
-    if os.path.exists(TOP):
-        top = pd.read_csv(TOP, dtype={"代號": str})
-        threshold = float(top[top["rank"] == 50]["市值億"].iloc[0])   # 第 50 名
-        rank90   = float(top[top["rank"] == 90]["市值億"].iloc[0])   # 第 90 名
-        rank60   = float(top[top["rank"] == 60]["市值億"].iloc[0])   # 第 60 名
-        rank100  = float(top[top["rank"] == 100]["市值億"].iloc[0])
-        top100_set = set(top["代號"])
-        print(f"實際 0050 門檻(rank 50): {threshold:.0f}億 / rank 60: {rank60:.0f} / rank 90: {rank90:.0f} / rank 100: {rank100:.0f}")
-        src = "twse_top100"
-        candidate_low = rank90 * 0.9     # 略放寬到第 95 名
-        candidate_high = threshold * 1.05   # 緊貼門檻上方也納入(剛卡邊)
+        print(f"⚠️ 找不到 {VAL},只能輸出 blind spot,無法做評分")
+        val = pd.DataFrame(columns=["代號", "名稱"])
     else:
-        # Fallback: anchor 估算
-        have = val.dropna(subset=["市值(億)"])
-        anchors = have[have["代號"].isin(KNOWN_0050)].sort_values("市值(億)")
-        threshold = float(anchors["市值(億)"].min()) if len(anchors) else 4000
-        candidate_low, candidate_high = threshold * 0.4, threshold * 1.5
-        top, top100_set = pd.DataFrame(), set()
-        print(f"⚠️ {TOP} 不存在,改用 anchor 估算門檻 {threshold:.0f}億")
-        src = "anchor"
-
-    have_mcap = val.dropna(subset=["市值(億)"])
-    print(f"我們 universe 有市值資料 {len(have_mcap)}/{len(val)} 檔")
+        val = pd.read_excel(VAL, "財報估值比較")
+        val["代號"] = val["代號"].astype(str)
+        for c in ["市值(億)", "收盤", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%"]:
+            if c in val.columns:
+                val[c] = pd.to_numeric(val[c], errors="coerce")
 
     # ---- 合併體檢/拐點 ----
     hea = pd.DataFrame()
@@ -96,21 +84,23 @@ def main():
         except Exception:
             pass
 
-    base = have_mcap[["代號", "名稱", "市值(億)", "收盤", "PER(自算)", "PE位階%",
-                      "PBR", "殖利率%", "最新月營收年增%"]].copy()
+    base = val.copy()
+    if "名稱" not in base.columns:
+        base["名稱"] = base["代號"].map(name_lookup)
+    base["TWSE排名"] = base["代號"].map(rank_lookup)
+    base["大盤比重%"] = base["代號"].map(weight_lookup)
     if not hea.empty:
         base = base.merge(hea, on="代號", how="left")
     if not inf.empty:
         base = base.merge(inf, on="代號", how="left")
     base["是否0050"] = base["代號"].apply(lambda c: "✓" if c in KNOWN_0050 else "")
-    base = base.sort_values("市值(億)", ascending=False).reset_index(drop=True)
-    base["universe排名"] = base.index + 1
 
-    # ---- 候選 A:我們 universe 內 + 在 51-90 區 ----
+    # ---- 候選 A:我們 universe 內 + rank 51-90 + 不在 0050 ----
     cand_a = base[
-        (base["是否0050"] == "") &
-        (base["市值(億)"] >= candidate_low) &
-        (base["市值(億)"] <= candidate_high)
+        base["TWSE排名"].notna() &
+        (base["TWSE排名"] >= 51) &
+        (base["TWSE排名"] <= 90) &
+        (base["是否0050"] == "")
     ].copy()
 
     def score(r):
@@ -136,61 +126,68 @@ def main():
             if mo >= 30: s += 15
             elif mo >= 15: s += 10
             elif mo >= 0: s += 3
-        gap = float(r["市值(億)"]) / threshold
-        if 0.85 <= gap <= 1.05: s += 20
-        elif 0.65 <= gap < 0.85: s += 12
-        elif gap < 0.65: s += 5
+        # 距離 0050 門檻越近(rank 越小)越加分
+        rk = r.get("TWSE排名")
+        if pd.notna(rk):
+            if rk <= 55: s += 25      # 緊貼門檻
+            elif rk <= 65: s += 18
+            elif rk <= 75: s += 10
+            else: s += 3
         return s
 
     if len(cand_a):
         cand_a["納入潛力分"] = cand_a.apply(score, axis=1)
-        cand_a["距門檻%"] = (cand_a["市值(億)"] / threshold * 100).round(0)
-        cand_a = cand_a.sort_values("納入潛力分", ascending=False)
+        cand_a = cand_a.sort_values(["納入潛力分", "TWSE排名"], ascending=[False, True])
 
-    # ---- 候選 B:blind spot — 在 twse_top100 rank 51-90 但不在我們 PICKS ----
-    cand_b = pd.DataFrame()
-    if src == "twse_top100":
-        our_codes = set(val["代號"].astype(str))
-        spot = top[(top["rank"] >= 51) & (top["rank"] <= 90)
-                   & (~top["代號"].isin(KNOWN_0050))
-                   & (~top["代號"].isin(our_codes))].copy()
-        spot["距門檻%"] = (spot["市值億"] / threshold * 100).round(0)
-        spot["建議"] = "加入 PICKS 抓體檢"
-        cand_b = spot[["rank", "代號", "名稱", "市值億", "距門檻%", "建議"]]
+    # ---- 候選 B:blind spot — rank 51-90 但不在我們 PICKS 也不在 0050 ----
+    our_codes = set(val["代號"].astype(str)) if not val.empty else set()
+    spot = rank[
+        (rank["rank"] >= 51) & (rank["rank"] <= 90) &
+        (~rank["代號"].isin(KNOWN_0050)) &
+        (~rank["代號"].isin(our_codes))
+    ].copy()
+    spot = spot.rename(columns={"rank": "TWSE排名", "比重%": "大盤比重%"})
+    spot["建議"] = "加入 PICKS 抓體檢"
 
     # ---- 輸出 ----
-    out_cols = ["代號", "名稱", "市值(億)", "距門檻%", "納入潛力分", "評等", "品質總分",
-                "估值", "改善訊號數", "分級", "含金量", "PER(自算)", "PE位階%",
-                "PBR", "殖利率%", "最新月營收年增%", "循環股", "universe排名"]
+    out_cols = ["TWSE排名", "代號", "名稱", "大盤比重%", "納入潛力分", "評等", "品質總分",
+                "估值", "改善訊號數", "分級", "含金量", "市值(億)", "PER(自算)", "PE位階%",
+                "PBR", "殖利率%", "最新月營收年增%", "循環股"]
     out_cols = [c for c in out_cols if c in cand_a.columns]
+
+    # universe 排名表(只顯示有 TWSE 排名的)
+    in_twse = base[base["TWSE排名"].notna()].sort_values("TWSE排名")
 
     os.makedirs("data", exist_ok=True)
     with pd.ExcelWriter(OUT, engine="openpyxl") as xw:
         cand_a[out_cols].to_excel(xw, sheet_name="候選A_已體檢", index=False)
-        cand_b.to_excel(xw, sheet_name="候選B_blind_spot", index=False)
-        base[["universe排名", "代號", "名稱", "市值(億)", "是否0050", "評等",
-              "估值", "PER(自算)", "PE位階%"]].to_excel(
-            xw, sheet_name="universe市值排名", index=False)
-        if not top.empty:
-            top.to_excel(xw, sheet_name="實際前100大", index=False)
+        spot[["TWSE排名", "代號", "名稱", "大盤比重%", "建議"]].to_excel(
+            xw, sheet_name="候選B_blind_spot", index=False)
+        in_twse_cols = [c for c in ["TWSE排名", "代號", "名稱", "大盤比重%",
+                                     "是否0050", "評等", "估值"] if c in in_twse.columns]
+        in_twse[in_twse_cols].to_excel(xw, sheet_name="universe在TWSE排名", index=False)
+        rank.head(100).to_excel(xw, sheet_name="TWSE前100", index=False)
         thresh_df = pd.DataFrame([
-            {"項目": "資料來源", "值": src},
-            {"項目": "0050 門檻(rank 50, 億)", "值": round(threshold, 1)},
-            {"項目": "候選下限(億)", "值": round(candidate_low, 1)},
-            {"項目": "候選上限(億)", "值": round(candidate_high, 1)},
-            {"項目": "候選A (已體檢) 檔數", "值": len(cand_a)},
-            {"項目": "候選B (blind spot) 檔數", "值": len(cand_b)},
+            {"項目": "rank 50 (邊緣) 比重%", "值": THRESH_50},
+            {"項目": "rank 60 比重%", "值": THRESH_60},
+            {"項目": "rank 90 (候選下限) 比重%", "值": THRESH_90},
+            {"項目": "我們 universe 在 TWSE 前 100 內", "值": int((in_twse["TWSE排名"] <= 100).sum())},
+            {"項目": "我們 universe 在 rank 51-90 內", "值": int(((in_twse["TWSE排名"] >= 51) & (in_twse["TWSE排名"] <= 90)).sum())},
+            {"項目": "候選A (已體檢)", "值": len(cand_a)},
+            {"項目": "候選B (blind spot)", "值": len(spot)},
         ])
         thresh_df.to_excel(xw, sheet_name="門檻說明", index=False)
 
     print(f"\n完成 → {OUT}")
-    print(f"候選A (已體檢) {len(cand_a)} 檔 / 候選B (blind spot) {len(cand_b)} 檔")
+    print(f"候選A (已體檢) {len(cand_a)} 檔 / 候選B (blind spot) {len(spot)} 檔")
     if len(cand_a):
-        top_show = cand_a.head(10)[["代號", "名稱", "市值(億)", "距門檻%", "納入潛力分",
-                                     "評等", "估值"]].to_string(index=False)
-        print(f"\n候選A Top 10:\n{top_show}")
-    if len(cand_b):
-        print(f"\n候選B (top100 但不在 PICKS):\n{cand_b.head(20).to_string(index=False)}")
+        show = cand_a.head(15)[[c for c in ["TWSE排名", "代號", "名稱", "大盤比重%",
+                                              "納入潛力分", "評等", "估值"]
+                                  if c in cand_a.columns]]
+        print(f"\n候選A Top 15:\n{show.to_string(index=False)}")
+    if len(spot):
+        print(f"\n候選B (blind spot) 全部 {len(spot)} 檔:\n"
+              f"{spot[['TWSE排名','代號','名稱','大盤比重%']].to_string(index=False)}")
     return cand_a
 
 

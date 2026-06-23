@@ -50,6 +50,40 @@ def load_quarterly_margin():
         return {}
 
 
+def scan_financial(m_all, eps):
+    """金融股拐點(不適用毛利/月營收/PER):用 EPS加速 + ROE回升(僅證券/保險有效) + PBR位階。
+    候選 = PBR位階≤50 且 EPS加速;ROE回升再加分。0 檔正常(若整族群被買到天花板)。"""
+    fin = m_all[m_all["金融"].notna()].copy()
+    for c in ["近四季ROE%", "5年平均ROE%", "PBR位階%", "殖利率%"]:
+        fin[c] = pd.to_numeric(fin[c], errors="coerce")
+    rows = []
+    for _, r in fin.iterrows():
+        c = r["代號"]
+        v = eps_series(eps, c)
+        e5 = cagr(v, min(4, len(v)-1))*100 if len(v) >= 2 else np.nan
+        e3 = cagr(v, 3)*100 if len(v) >= 4 else np.nan
+        eps_acc  = pd.notna(e3) and pd.notna(e5) and e3 > e5 and e3 > 0
+        roe, roe5 = r["近四季ROE%"], r["5年平均ROE%"]
+        roe_valid = (roe > 0)                                # 金控ROE顯示0=口徑不適用
+        roe_up    = roe_valid and pd.notna(roe5) and roe > roe5
+        pbr_cheap = pd.notna(r["PBR位階%"]) and r["PBR位階%"] <= 50
+        sig = sum([eps_acc, roe_up])                          # 最多2(金控只能到1)
+        candidate = pbr_cheap and eps_acc
+        tier = "🔥金融拐點" if (candidate and sig == 2) else ("🌱金融初拐點" if candidate else "")
+        rows.append({
+            "代號": c, "名稱": r["名稱"], "分級": tier,
+            "EPS5y%": round(e5, 1) if pd.notna(e5) else None,
+            "EPS近3y%": round(e3, 1) if pd.notna(e3) else None,
+            "EPS加速": "✓" if eps_acc else "✗",
+            "ROE": roe if roe > 0 else None, "5年均ROE": roe5 if roe5 > 0 else None,
+            "ROE回升": "✓" if roe_up else ("—金控0" if roe == 0 else "✗"),
+            "PBR位階": r["PBR位階%"], "PBR便宜": "✓" if pbr_cheap else "✗",
+            "PER": round(r["PER(自算)"], 1) if pd.notna(r["PER(自算)"]) else None,
+            "殖利率%": r["殖利率%"],
+        })
+    return pd.DataFrame(rows).sort_values(["分級", "PBR位階"], ascending=[False, True])
+
+
 def main():
     val = pd.read_excel(SRC, "財報估值比較"); val["代號"] = val["代號"].astype(str)
     his = pd.read_excel(SRC, "相對歷史水位"); his["代號"] = his["代號"].astype(str)
@@ -113,12 +147,17 @@ def main():
 
     df = pd.DataFrame(rows)
     cand = df[df["分級"] != ""].sort_values(["改善訊號數", "估值位階"], ascending=[False, True])
+    fin_df = scan_financial(m, eps)
+    fin_cand = fin_df[fin_df["分級"] != ""]
     with pd.ExcelWriter(OUT, engine="openpyxl") as xw:
         cand.to_excel(xw, sheet_name="潛在拐點觀察區", index=False)
         df.sort_values("改善訊號數", ascending=False).to_excel(xw, sheet_name="全部訊號", index=False)
+        fin_cand.to_excel(xw, sheet_name="金融拐點候選", index=False)
+        fin_df.to_excel(xw, sheet_name="金融全部", index=False)
 
     print(f"完成 → {OUT}  (逐季毛利{'已接' if has_q else '待補,A訊號暫無'})")
-    print(f"潛在拐點候選 {len(cand)} 檔:🔥強 {len(cand[cand['分級']=='🔥強拐點'])} / 🌱初 {len(cand[cand['分級']=='🌱初拐點'])}")
+    print(f"非金融拐點 {len(cand)} 檔:🔥強 {len(cand[cand['分級']=='🔥強拐點'])} / 🌱初 {len(cand[cand['分級']=='🌱初拐點'])}")
+    print(f"金融拐點 {len(fin_cand)} 檔(PBR位階≤50且EPS加速)")
     return cand
 
 

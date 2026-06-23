@@ -438,7 +438,7 @@ def load_cache(sid):
 
 # ---------- 由快取組出 Excel(每次都用『目前所有已完成』重建,故隨時有最新進度檔)----------
 def build_output(namemap):
-    rows, hists, rev_years, eps_years = [], [], {}, {}
+    rows, hists, rev_years, eps_years, q_gms = [], [], {}, {}, {}
     done = 0
     for sid in PICKS:
         c = load_cache(sid)
@@ -450,6 +450,7 @@ def build_output(namemap):
         name = namemap.get(sid, sid)
         if c.get("rev_year"): rev_years[f"{sid} {name}"] = c["rev_year"]
         if c.get("eps_year"): eps_years[f"{sid} {name}"] = c["eps_year"]
+        if c.get("q_gm"):     q_gms[f"{sid} {name}"] = c["q_gm"]
     if not rows:
         print("尚無任何已完成資料,略過輸出"); return 0
 
@@ -489,6 +490,10 @@ def build_output(namemap):
         ry, ey = pivot_years(rev_years), pivot_years(eps_years)
         if not ry.empty: ry.to_excel(xw, sheet_name="逐年營收(億)")
         if not ey.empty: ey.to_excel(xw, sheet_name="逐年EPS")
+        if q_gms:                                       # 逐季毛利率(近8季,供拐點掃描算毛利拐頭)
+            qg = pd.DataFrame({lbl: pd.Series(v) for lbl, v in q_gms.items()}).T
+            qg = qg.reindex(columns=sorted(qg.columns))
+            qg.to_excel(xw, sheet_name="逐季毛利率")
     print(f"  → 已更新 {OUTPUT}(目前 {done}/{len(PICKS)} 檔)")
     return done
 
@@ -515,8 +520,12 @@ def main():
                 row, perf, rev_y, eps_y, hist = summary_row(sid, name, raw)
                 if sid in FINANCIALS:                  # 金融股標記
                     row["金融"] = "🏦"; hist["金融"] = "🏦"
+                q3 = {}                                # 逐季毛利率(近8季,供拐點掃描算毛利拐頭)
+                if not perf.empty and "毛利率%" in perf.columns:
+                    qm = perf["毛利率%"].dropna().tail(8)
+                    q3 = {str(d)[:10]: round(float(x), 2) for d, x in qm.items()}
                 save_cache(sid, {"row": row, "hist": hist,
-                                 "rev_year": rev_y, "eps_year": eps_y})  # 立刻存,續跑用
+                                 "rev_year": rev_y, "eps_year": eps_y, "q_gm": q3})  # 立刻存,續跑用
                 break
             except Exception as e:
                 if _is_rate_limit(e) and tries < MAX_RATE_RETRY:

@@ -1,0 +1,204 @@
+# -*- coding: utf-8 -*-
+"""
+台股 體檢總表 (Stock Health Check)
+=======================================================================
+依「找好公司的完整體檢框架 ①~⑩ + 循環股例外」對 data/台股財報估值.xlsx 全名單逐項打分。
+
+品質總分(0~100) = 9 個面向加權(估值另計,因為『好公司≠好價格』):
+  ⑥EPS真成長        20  (5年&近3年EPS CAGR;最重要的成長引擎,不是只看營收)
+  ⑧獲利含金量        20  (OCF/淨利;賺的是不是真現金 — 最強照妖鏡)
+  ⑨ROE              12  (資本運用效率)
+  ②毛利率位階        10  (定價權/競爭力)
+  ③營益率位階         8  (費用控管/營運槓桿)
+  ④淨利率位階         8  (最終獲利能力)
+  ⑤營收規模成長(5yCAGR) 8 (生意有沒有變大)
+  ①營收動能(月YoY)    7  (最即時的成長訊號)
+  ⑦EPS不落後營收      7  (抓股本稀釋/毛利漏水:營收長但EPS沒跟上)
+估值(另計)        ⑩ PE位階 + PBR位階 → 便宜 / 合理 / 偏貴 / 過熱
+循環股例外          逐年EPS曾為負 或 大起大落(max/min>3) → 標記,提示『PER失真,看PBR位階』
+金融股(🏦)         毛利/營益口徑不適用 → 不評分,單獨標記
+
+評等: A≥80  B 65-79  C 50-64  D<50
+輸出: data/台股_體檢總表.xlsx
+"""
+import numpy as np, pandas as pd
+
+SRC = "data/台股財報估值.xlsx"
+OUT = "data/台股_體檢總表.xlsx"
+
+
+def eps_cagr(eps_df, code):
+    for k in eps_df.index:
+        if str(k).split()[0] == code:
+            v = [x for x in eps_df.loc[k].tolist() if pd.notna(x)]
+            c5 = ((v[-1]/v[0])**(1/(len(v)-1))-1)*100 if len(v) >= 2 and v[0] > 0 and v[-1] > 0 else np.nan
+            c3 = ((v[-1]/v[-3])**0.5-1)*100 if len(v) >= 3 and v[-3] > 0 and v[-1] > 0 else np.nan
+            return c5, c3, v
+    return np.nan, np.nan, []
+
+
+def is_cyclical(v):
+    """逐年EPS曾為負 或 大起大落(最大/最小 > 3倍) → 循環嫌疑。"""
+    if len(v) < 3:
+        return False
+    if min(v) <= 0:
+        return True
+    return (max(v) / min(v)) > 3
+
+
+def grade_quality(r):
+    """回傳 (品質總分, 各分項dict, 主要漏洞list)。需先排除金融股。"""
+    s, parts, leak = 0.0, {}, []
+
+    # ⑥ EPS 真成長 (20)
+    e5, e3 = r["EPS5y"], r["EPS3y"]
+    if pd.notna(e5) and pd.notna(e3):
+        if e5 >= 10 and e3 >= 10: p = 20
+        elif e5 > 0 and e3 > 0:   p = 12
+        elif (e5 < 0) ^ (e3 < 0): p = 4; leak.append("EPS單期衰退")
+        else:                     p = 0; leak.append("EPS連年衰退")
+    else:
+        p = 0; leak.append("EPS資料不足")
+    parts["⑥EPS成長"] = p; s += p
+
+    # ⑧ 含金量 (20)
+    g = r["獲利含金量"]
+    if pd.isna(g):              p = 0; leak.append("無現金資料")
+    elif g >= 1.2:             p = 20
+    elif g >= 1.0:             p = 16
+    elif g >= 0.7:             p = 10
+    elif g >= 0.5:             p = 4;  leak.append(f"含金量{g:.1f}弱")
+    else:                      p = 0;  leak.append(f"含金量{g:.1f}差")
+    parts["⑧含金量"] = p; s += p
+
+    # ⑨ ROE (12)
+    roe = r["近四季ROE%"]
+    if pd.isna(roe):           p = 0
+    elif roe >= 20:            p = 12
+    elif roe >= 15:            p = 9
+    elif roe >= 12:            p = 6
+    elif roe >= 8:             p = 3
+    else:                      p = 0; leak.append(f"ROE{roe:.0f}低")
+    parts["⑨ROE"] = p; s += p
+
+    # ②③④ 三率位階
+    def lvl(val, full, hi, mid):
+        if pd.isna(val): return 0
+        if val >= 60: return full
+        if val >= 40: return hi
+        if val >= 25: return mid
+        return 0
+    p = lvl(r["毛利率位階%"], 10, 7, 4); parts["②毛利位階"] = p; s += p
+    if pd.notna(r["毛利率位階%"]) and r["毛利率位階%"] < 25: leak.append("毛利壓歷史低檔")
+    p = lvl(r["營益率位階%"], 8, 6, 3); parts["③營益位階"] = p; s += p
+    p = lvl(r["淨利率位階%"], 8, 6, 3); parts["④淨利位階"] = p; s += p
+
+    # ⑤ 營收規模成長 (8)
+    rc = r["5年營收CAGR%"]
+    if pd.isna(rc):            p = 0
+    elif rc >= 10:             p = 8
+    elif rc >= 0:              p = 5
+    else:                      p = 0; leak.append(f"營收5年萎縮{rc:.0f}%")
+    parts["⑤營收成長"] = p; s += p
+
+    # ① 營收動能 月YoY (7)
+    mo = r["最新月營收年增%"]
+    if pd.isna(mo):            p = 0
+    elif mo >= 15:             p = 7
+    elif mo >= 0:              p = 4
+    else:                      p = 0; leak.append(f"月營收轉負{mo:.0f}%")
+    parts["①營收動能"] = p; s += p
+
+    # ⑦ EPS 不落後營收 (7) — 抓稀釋/毛利漏水
+    if pd.notna(e5) and pd.notna(rc) and rc > 0:
+        if e5 >= rc:           p = 7
+        elif e5 >= 0.5*rc:     p = 4
+        else:                  p = 0; leak.append("EPS遠落後營收(稀釋/毛利漏)")
+    elif pd.notna(e5) and pd.notna(rc) and rc <= 0:
+        p = 4 if e5 > 0 else 0   # 營收沒長,EPS有長(靠效率)也給點
+    else:
+        p = 0
+    parts["⑦EPS跟上營收"] = p; s += p
+
+    return round(s, 1), parts, leak
+
+
+def valuation_tag(pe, pbr):
+    """⑩ 估值標籤:綜合 PE位階 + PBR位階。"""
+    xs = [x for x in (pe, pbr) if pd.notna(x)]
+    if not xs: return "—"
+    m = np.mean(xs)
+    if m <= 30: return "🟢便宜"
+    if m <= 55: return "🟡合理"
+    if m <= 80: return "🟠偏貴"
+    return "🔴過熱"
+
+
+def main():
+    val = pd.read_excel(SRC, "財報估值比較"); val["代號"] = val["代號"].astype(str)
+    his = pd.read_excel(SRC, "相對歷史水位"); his["代號"] = his["代號"].astype(str)
+    eps = pd.read_excel(SRC, "逐年EPS", index_col=0)
+
+    m = val.merge(his[["代號", "毛利率位階%", "營益率位階%", "淨利率位階%", "ROE位階%", "PER位階%", "PBR位階%"]],
+                  on="代號", how="left")
+    for c in ["近四季ROE%", "獲利含金量", "5年營收CAGR%", "最新月營收年增%", "近四季EPS",
+              "PER(自算)", "PE位階%", "毛利率位階%", "營益率位階%", "淨利率位階%", "PBR位階%", "殖利率%"]:
+        m[c] = pd.to_numeric(m[c], errors="coerce")
+
+    rows = []
+    for _, r in m.iterrows():
+        c = r["代號"]
+        e5, e3, v = eps_cagr(eps, c)
+        rr = dict(r); rr["EPS5y"], rr["EPS3y"] = e5, e3
+        cyc = is_cyclical(v)
+        fin = pd.notna(r.get("金融"))
+        if fin:
+            score, parts, leak, grade = np.nan, {}, ["金融股:口徑不適用,不評分"], "金融🏦"
+        else:
+            score, parts, leak = grade_quality(rr)
+            grade = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
+        out = {"代號": c, "名稱": r["名稱"], "評等": grade, "品質總分": score,
+               "EPS5y%": round(e5, 1) if pd.notna(e5) else None,
+               "EPS近3y%": round(e3, 1) if pd.notna(e3) else None,
+               "ROE": r["近四季ROE%"], "含金量": r["獲利含金量"],
+               "毛利位階": r["毛利率位階%"], "淨利位階": r["淨利率位階%"],
+               "營收5yCAGR": r["5年營收CAGR%"], "月營收YoY": r["最新月營收年增%"],
+               "PER": round(r["PER(自算)"], 1) if pd.notna(r["PER(自算)"]) else None,
+               "PE位階": r["PE位階%"], "PBR位階": r["PBR位階%"],
+               "估值": valuation_tag(r["PE位階%"], r["PBR位階%"]),
+               "殖利率": r["殖利率%"],
+               "循環股": "⚠️循環(看PBR)" if cyc else "",
+               "主要漏洞": "、".join(leak[:3])}
+        out.update(parts)
+        rows.append(out)
+
+    df = pd.DataFrame(rows)
+    nonfin = df[df["評等"] != "金融🏦"].copy()
+    df = pd.concat([nonfin.sort_values("品質總分", ascending=False),
+                    df[df["評等"] == "金融🏦"]], ignore_index=True)
+
+    part_cols = ["⑥EPS成長", "⑧含金量", "⑨ROE", "②毛利位階", "③營益位階",
+                 "④淨利位階", "⑤營收成長", "①營收動能", "⑦EPS跟上營收"]
+    base = ["代號", "名稱", "評等", "品質總分", "EPS5y%", "EPS近3y%", "ROE", "含金量",
+            "毛利位階", "淨利位階", "營收5yCAGR", "月營收YoY", "PER", "PE位階", "PBR位階",
+            "估值", "殖利率", "循環股", "主要漏洞"]
+    full = df[base + part_cols]
+
+    with pd.ExcelWriter(OUT, engine="openpyxl") as xw:
+        full.to_excel(xw, sheet_name="體檢總表", index=False)
+        a = nonfin[nonfin["評等"] == "A"].sort_values("品質總分", ascending=False)
+        a[base].to_excel(xw, sheet_name="A級好公司", index=False)
+        ace = a[a["估值"].isin(["🟢便宜", "🟡合理"])]
+        ace[base].to_excel(xw, sheet_name="A級+好價格", index=False)
+        cyc = nonfin[nonfin["循環股"] != ""].sort_values("PBR位階")
+        cyc[base].to_excel(xw, sheet_name="循環股(看PBR)", index=False)
+
+    print(f"完成 → {OUT}  (評分 {len(nonfin)} 檔 + 金融 {len(df)-len(nonfin)} 檔)")
+    print("評等分布:", nonfin["評等"].value_counts().reindex(["A","B","C","D"]).to_dict())
+    print(f"A級好公司 {len(nonfin[nonfin['評等']=='A'])} 檔 / 其中估值便宜或合理 "
+          f"{len(nonfin[(nonfin['評等']=='A') & (nonfin['估值'].isin(['🟢便宜','🟡合理']))])} 檔")
+    return full
+
+
+if __name__ == "__main__":
+    main()

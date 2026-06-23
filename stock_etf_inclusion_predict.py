@@ -24,7 +24,9 @@
   1. 把全市場 rank 100 對齊到我們 universe(用代號 join)
   2. 候選 A = 我們已體檢 + rank 51-90(可直接給體檢/拐點/估值評分)
   3. 候選 B = blind spot — rank 51-90 但不在我們 PICKS → 該加進去抓
-  4. 加分:評等 A/B + 估值便宜或合理 + 拐點訊號 ≥ 2 + 含金量 ≥ 1.0
+  4. 加分:評等 A/B + 估值便宜或合理 + 未來估值(PEG<1/forward便宜) + 拐點 + 含金量
+     ★ 未來估值加分:當下 PE 可能過熱,但用明年 EPS 算便宜(PEG<1)就加分救回 —
+       這是「成長還沒被 price in」的卡位機會。與 PE位階(過去尺)互補。
 """
 import os
 import pandas as pd
@@ -76,7 +78,9 @@ def main():
     if os.path.exists(HEA):
         hea = pd.read_excel(HEA, "體檢總表")
         hea["代號"] = hea["代號"].astype(str)
-        hea = hea[["代號", "評等", "品質總分", "估值", "循環股", "含金量"]]
+        hea_cols = ["代號", "評等", "品質總分", "估值", "循環股", "含金量",
+                    "成長率g%", "ForwardPE", "PEG", "未來估值"]
+        hea = hea[[c for c in hea_cols if c in hea.columns]]
     inf = pd.DataFrame()
     if os.path.exists(INF):
         try:
@@ -120,6 +124,20 @@ def main():
         (base["是否0050"] == "")
     ].copy()
 
+    def forward_bonus(r):
+        """未來估值加分:股票買的是未來。當下PE可能過熱,但若用明年EPS算便宜(PEG<1)
+        則加分救回 — 這是『成長還沒被 price in』的卡位機會。與 PE位階(過去尺)互補。"""
+        s = 0
+        peg = pd.to_numeric(r.get("PEG"), errors="coerce")
+        fv = str(r.get("未來估值", ""))
+        if pd.notna(peg) and 0 < peg < 1:
+            s += 20                                   # PEG<1:成長未反映,最強 forward 訊號
+        elif "未來便宜" in fv:
+            s += 15
+        elif "未來合理" in fv:
+            s += 8
+        return s
+
     def score(r):
         s = 0
         g = str(r.get("評等", ""))
@@ -130,6 +148,7 @@ def main():
         if "便宜" in v: s += 25
         elif "合理" in v: s += 18
         elif "偏貴" in v: s += 5
+        s += forward_bonus(r)                          # 未來估值(forward PE/PEG)加分
         ca = pd.to_numeric(r.get("含金量"), errors="coerce")
         if pd.notna(ca):
             if ca >= 1.2: s += 15
@@ -186,6 +205,7 @@ def main():
             if "便宜" in v: s += 25
             elif "合理" in v: s += 18
             elif "偏貴" in v: s += 5
+            s += forward_bonus(r)                      # 未來估值(forward PE/PEG)加分
             ca = pd.to_numeric(r.get("含金量"), errors="coerce")
             if pd.notna(ca):
                 if ca >= 1.2: s += 15
@@ -238,7 +258,8 @@ def main():
 
     # ---- 輸出 ----
     out_cols = ["TWSE排名", "代號", "名稱", "大盤比重%", "納入潛力分", "評等", "品質總分",
-                "估值", "改善訊號數", "分級", "含金量", "市值(億)", "PER(自算)", "PE位階%",
+                "估值", "未來估值", "PEG", "ForwardPE", "成長率g%",
+                "改善訊號數", "分級", "含金量", "市值(億)", "PER(自算)", "PE位階%",
                 "PBR", "殖利率%", "最新月營收年增%", "循環股"]
     out_cols = [c for c in out_cols if c in cand_a.columns]
 
@@ -256,7 +277,8 @@ def main():
         rank.head(100).to_excel(xw, sheet_name="TWSE前100", index=False)
         if not cand_otc_a.empty:
             otc_a_cols = ["OTC排名", "代號", "名稱", "OTC市值億", "納入潛力分", "評等",
-                          "品質總分", "估值", "改善訊號數", "分級", "含金量",
+                          "品質總分", "估值", "未來估值", "PEG", "ForwardPE", "成長率g%",
+                          "改善訊號數", "分級", "含金量",
                           "PER(自算)", "PE位階%", "PBR", "殖利率%",
                           "最新月營收年增%", "循環股"]
             otc_a_cols = [c for c in otc_a_cols if c in cand_otc_a.columns]
@@ -282,8 +304,8 @@ def main():
     print(f"\n完成 → {OUT}")
     print(f"候選A (已體檢) {len(cand_a)} 檔 / 候選B (blind spot) {len(spot)} 檔")
     if len(cand_a):
-        show = cand_a.head(15)[[c for c in ["TWSE排名", "代號", "名稱", "大盤比重%",
-                                              "納入潛力分", "評等", "估值"]
+        show = cand_a.head(15)[[c for c in ["TWSE排名", "代號", "名稱", "納入潛力分",
+                                              "評等", "估值", "未來估值", "PEG"]
                                   if c in cand_a.columns]]
         print(f"\n候選A Top 15:\n{show.to_string(index=False)}")
     if len(spot):
@@ -291,8 +313,8 @@ def main():
               f"{spot[['TWSE排名','代號','名稱','大盤比重%']].to_string(index=False)}")
     print(f"\n富櫃50 候選A (已體檢) {len(cand_otc_a)} 檔 / B (blind) {len(cand_otc_b)} 檔")
     if not cand_otc_a.empty:
-        show = cand_otc_a.head(10)[[c for c in ["OTC排名","代號","名稱","OTC市值億",
-                                                  "納入潛力分","評等","估值"]
+        show = cand_otc_a.head(10)[[c for c in ["OTC排名","代號","名稱","納入潛力分",
+                                                  "評等","估值","未來估值","PEG"]
                                       if c in cand_otc_a.columns]]
         print(f"富櫃50 候選A Top 10:\n{show.to_string(index=False)}")
     if not cand_otc_b.empty:

@@ -135,6 +135,44 @@ def valuation_tag(pe, pbr):
     return "🔴過熱"
 
 
+def forward_metrics(close, ttm_eps, per, e3, e5, mo_yoy, cyclical):
+    """用『未來 EPS』修正當下 PE — 股票買的是未來不是過去。
+    成長率 g 來源:近3年EPS CAGR(主),沒有則退 5年;cap [-30, +60] 防爆衝外推。
+    保守情境 g_保守 = min(g, 月營收YoY) — 月營收領先 EPS,若動能轉弱先反映。
+    循環股豁免:獲利上下震盪,線性外推無意義 → 一律 None,回頭看 PBR。
+    回傳:成長率g% / 預估明年EPS / ForwardPE(中性) / ForwardPE保守 / PEG / 未來估值標籤。"""
+    if cyclical or pd.isna(close) or pd.isna(ttm_eps) or ttm_eps <= 0:
+        return {}
+    g = e3 if pd.notna(e3) else e5
+    if pd.isna(g):
+        return {}
+    g = max(-30.0, min(60.0, float(g)))               # 防線性外推爆衝
+    g_cons = g
+    if pd.notna(mo_yoy):                               # 保守:月營收動能若更低,以它為準
+        g_cons = max(-30.0, min(g, float(mo_yoy)))
+    fwd_eps = ttm_eps * (1 + g / 100)
+    fwd_eps_c = ttm_eps * (1 + g_cons / 100)
+    fpe   = (close / fwd_eps)   if fwd_eps   > 0 else None
+    fpe_c = (close / fwd_eps_c) if fwd_eps_c > 0 else None
+    peg = (per / g) if (pd.notna(per) and g > 0) else None
+    return {"成長率g%": round(g, 1),
+            "預估明年EPS": round(fwd_eps, 2),
+            "ForwardPE": round(fpe, 1) if fpe else None,
+            "ForwardPE保守": round(fpe_c, 1) if fpe_c else None,
+            "PEG": round(peg, 2) if peg else None,
+            "未來估值": forward_tag(fpe, peg)}
+
+
+def forward_tag(fpe, peg):
+    """Forward PE + PEG 綜合標籤(用未來 EPS 看現價貴不貴)。"""
+    if fpe is None: return "—"
+    if peg is not None and 0 < peg < 1: return "🟢成長未反映"   # PEG<1:成長還沒被 price in
+    if fpe < 15: return "🟢未來便宜"
+    if fpe < 22: return "🟡未來合理"
+    if fpe < 32: return "🟠未來偏貴"
+    return "🔴未來過熱"
+
+
 def main():
     val = pd.read_excel(SRC, "財報估值比較"); val["代號"] = val["代號"].astype(str)
     his = pd.read_excel(SRC, "相對歷史水位"); his["代號"] = his["代號"].astype(str)
@@ -143,7 +181,8 @@ def main():
     m = val.merge(his[["代號", "毛利率位階%", "營益率位階%", "淨利率位階%", "ROE位階%", "PER位階%", "PBR位階%"]],
                   on="代號", how="left")
     for c in ["近四季ROE%", "獲利含金量", "5年營收CAGR%", "最新月營收年增%", "近四季EPS",
-              "PER(自算)", "PE位階%", "毛利率位階%", "營益率位階%", "淨利率位階%", "PBR位階%", "殖利率%"]:
+              "PER(自算)", "PE位階%", "毛利率位階%", "營益率位階%", "淨利率位階%", "PBR位階%",
+              "殖利率%", "收盤"]:
         m[c] = pd.to_numeric(m[c], errors="coerce")
 
     rows = []
@@ -170,6 +209,10 @@ def main():
                "殖利率": r["殖利率%"],
                "循環股": "⚠️循環(看PBR)" if cyc else "",
                "主要漏洞": "、".join(leak[:3])}
+        # Forward PE:用未來 EPS 看現價(股票買的是未來不是過去)
+        fwd = forward_metrics(r.get("收盤"), r.get("近四季EPS"), r.get("PER(自算)"),
+                              e3, e5, r.get("最新月營收年增%"), cyc)
+        out.update(fwd)
         out.update(parts)
         rows.append(out)
 
@@ -182,7 +225,11 @@ def main():
                  "④淨利位階", "⑤營收成長", "①營收動能", "⑦EPS跟上營收"]
     base = ["代號", "名稱", "評等", "品質總分", "EPS5y%", "EPS近3y%", "ROE", "含金量",
             "毛利位階", "淨利位階", "營收5yCAGR", "月營收YoY", "PER", "PE位階", "PBR位階",
-            "估值", "殖利率", "循環股", "主要漏洞"]
+            "估值", "成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值",
+            "殖利率", "循環股", "主要漏洞"]
+    for col in ["成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值"]:
+        if col not in df.columns:
+            df[col] = None
     full = df[base + part_cols]
 
     with pd.ExcelWriter(OUT, engine="openpyxl") as xw:
@@ -193,6 +240,11 @@ def main():
         ace[base].to_excel(xw, sheet_name="A級+好價格", index=False)
         cyc = nonfin[nonfin["循環股"] != ""].sort_values("PBR位階")
         cyc[base].to_excel(xw, sheet_name="循環股(看PBR)", index=False)
+        # 未來估值便宜的成長股:Forward PE 看起來便宜 + 評等不差(用未來修正當下 PE)
+        fwd = nonfin[nonfin["未來估值"].isin(["🟢成長未反映", "🟢未來便宜", "🟡未來合理"])
+                     & nonfin["評等"].isin(["A", "B"])].copy()
+        fwd = fwd.sort_values(["PEG", "ForwardPE"], na_position="last")
+        fwd[base].to_excel(xw, sheet_name="未來估值便宜(ForwardPE)", index=False)
 
     print(f"完成 → {OUT}  (評分 {len(nonfin)} 檔 + 金融 {len(df)-len(nonfin)} 檔)")
     print("評等分布:", nonfin["評等"].value_counts().reindex(["A","B","C","D"]).to_dict())

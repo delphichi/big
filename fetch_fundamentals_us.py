@@ -35,7 +35,7 @@ import requests
 WATCH = os.environ.get("US_WATCH_FILE", "tickers_us.txt")    # 可指定 tickers_us_core.txt
 OUT   = "data/美股體檢總表.xlsx"
 KEY   = os.environ.get("FMP_API_KEY", "")
-BASE  = "https://financialmodelingprep.com/api/v3"
+BASE  = "https://financialmodelingprep.com/stable"     # 2025/8/31 後 v3 變 legacy,新用戶須用 stable
 RATE_SLEEP = 0.25                  # 每檔間隔(starter ~300/分)
 
 
@@ -48,10 +48,12 @@ def load_watch():
     return list(dict.fromkeys([t for t in out if t]))
 
 
-def get(path):
+def get(endpoint, **params):
+    """stable 端點:symbol 與 period/limit 都用 query parameter。"""
     if not KEY:
         raise RuntimeError("未設 FMP_API_KEY")
-    r = requests.get(f"{BASE}{path}", params={"apikey": KEY}, timeout=20)
+    params["apikey"] = KEY
+    r = requests.get(f"{BASE}/{endpoint}", params=params, timeout=20)
     if r.status_code == 429:
         raise RuntimeError("rate-limit")
     r.raise_for_status()
@@ -81,12 +83,12 @@ def historical_pctl(values, current):
 
 
 def fetch_one(sym):
-    inc_a  = get(f"/income-statement/{sym}?period=annual&limit=6")
-    inc_q  = get(f"/income-statement/{sym}?period=quarter&limit=8")
-    cf_a   = get(f"/cash-flow-statement/{sym}?period=annual&limit=6")
-    ttm    = get(f"/key-metrics-ttm/{sym}")
-    ratios = get(f"/ratios/{sym}?period=annual&limit=5")
-    prof   = get(f"/profile/{sym}")
+    inc_a  = get("income-statement",      symbol=sym, period="annual",  limit=6)
+    inc_q  = get("income-statement",      symbol=sym, period="quarter", limit=8)
+    cf_a   = get("cash-flow-statement",   symbol=sym, period="annual",  limit=6)
+    ttm    = get("key-metrics-ttm",       symbol=sym)
+    ratios = get("ratios",                symbol=sym, period="annual",  limit=5)
+    prof   = get("profile",               symbol=sym)
 
     # 年序列(由舊到新)
     inc_a = list(reversed(inc_a))
@@ -235,6 +237,9 @@ def main():
             print(f"  ! {sym} 失敗:{e}")
         time.sleep(RATE_SLEEP)
 
+    if not rows:
+        print("⚠️ 0 檔成功,不產出 Excel(可能是 API key/端點問題,先查 log)")
+        return
     df = pd.DataFrame(rows).sort_values("品質總分", ascending=False)
     cols = ["代號", "名稱", "產業", "評等", "品質總分", "EPS5y%", "EPS3y%", "ROE%", "ROIC%", "含金量",
             "毛利率%", "淨利率%", "營收CAGR%", "PER", "PE位階", "PBR", "PBR位階", "PEG",

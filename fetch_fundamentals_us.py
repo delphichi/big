@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-WATCH = "tickers_us.txt"
+WATCH = os.environ.get("US_WATCH_FILE", "tickers_us.txt")    # 可指定 tickers_us_core.txt
 OUT   = "data/美股體檢總表.xlsx"
 KEY   = os.environ.get("FMP_API_KEY", "")
 BASE  = "https://financialmodelingprep.com/api/v3"

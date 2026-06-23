@@ -86,7 +86,8 @@ def fetch_one(sym):
     inc_a  = get("income-statement",      symbol=sym, period="annual",  limit=6)
     inc_q  = get("income-statement",      symbol=sym, period="quarter", limit=8)
     cf_a   = get("cash-flow-statement",   symbol=sym, period="annual",  limit=6)
-    ttm    = get("key-metrics-ttm",       symbol=sym)
+    ttm    = get("key-metrics-ttm",       symbol=sym)                     # ROIC/ROE/含金量等品質
+    km_a   = get("key-metrics",           symbol=sym, period="annual",  limit=5)  # 歷史 PER/PB 用這個
     ratios = get("ratios",                symbol=sym, period="annual",  limit=5)
     prof   = get("profile",               symbol=sym)
 
@@ -120,17 +121,23 @@ def fetch_one(sym):
             if v is not None: return v
         return None
 
-    # 5 年歷史 PE/PB → 位階(ratios stable 鍵名)
-    hist_pe = [pick(r, "priceEarningsRatio", "priceToEarningsRatio", "peRatio") for r in ratios]
-    hist_pb = [pick(r, "priceToBookRatio", "priceToBookValueRatio", "pbRatio") for r in ratios]
-    # TTM 估值(key-metrics-ttm stable 鍵名)
-    cur_pe = pick(ttm0, "peRatioTTM", "priceToEarningsRatioTTM", "priceEarningsRatioTTM")
-    cur_pb = pick(ttm0, "pbRatioTTM", "priceToBookRatioTTM", "priceToBookValueRatioTTM")
-    # TTM ROE/ROIC
-    _roe = pick(ttm0, "roeTTM", "returnOnEquityTTM")
-    _roic = pick(ttm0, "roicTTM", "returnOnInvestedCapitalTTM", "returnOnCapitalEmployedTTM")
-    _peg = pick(ttm0, "pegRatioTTM", "priceToEarningsGrowthRatioTTM")
-    _dy = pick(ttm0, "dividendYieldTTM", "dividendYieldPercentageTTM")
+    # 5 年歷史 PE/PB → 位階(改用 key-metrics annual,stable 把 ratios 拆了沒這個)
+    km_a_sorted = list(reversed(km_a))
+    hist_pe = [pick(r, "peRatio", "priceEarningsRatio", "priceToEarningsRatio") for r in km_a_sorted]
+    hist_pb = [pick(r, "pbRatio", "priceToBookRatio", "priceToBookValueRatio") for r in km_a_sorted]
+    # TTM PER/PBR:stable 的 key-metrics-ttm 不含,改自算(profile.price ÷ EPS, 跟台股同款)
+    price = prof0.get("price") or prof0.get("regularMarketPrice")
+    cur_pe = (price / eps[-1]) if (price and eps and eps[-1] and eps[-1] > 0) else None
+    # PBR 自算需淨值,先試 ttm 的 bookValuePerShare,沒有則跳過
+    bvps = pick(ttm0, "bookValuePerShareTTM", "tangibleBookValuePerShareTTM")
+    cur_pb = (price / bvps) if (price and bvps and bvps > 0) else None
+    # TTM ROE/ROIC(key-metrics-ttm 確認有)
+    _roe = pick(ttm0, "returnOnEquityTTM", "roeTTM")
+    _roic = pick(ttm0, "returnOnInvestedCapitalTTM", "roicTTM", "returnOnCapitalEmployedTTM")
+    _peg = None              # stable 無 TTM PEG,留空(可未來自算 PER/EPS3y)
+    _dy = pick(prof0, "lastDividend", "dividendYield")  # profile 有 dividend
+    if _dy and price and _dy > 1:  # 若是絕對股息金額,換算殖利率
+        _dy = _dy / price
     _debt = pick(ttm0, "debtToAssetsTTM", "totalDebtToAssetsTTM")
 
     rev_l = rev[-1] if rev else None

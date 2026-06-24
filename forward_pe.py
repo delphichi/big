@@ -31,14 +31,21 @@ def forward_tag(fpe, peg):
 
 
 def forward_metrics(close, ttm_eps, per, e3, e5, mo_yoy, cyclical):
-    """回傳 forward 估值 dict;循環/資料不足回 {}。
-    輸入:收盤、近四季EPS、當下PER、近3年EPS成長%、近5年EPS成長%、月營收YoY%、是否循環。"""
-    if cyclical or pd.isna(close) or pd.isna(ttm_eps) or ttm_eps <= 0:
-        return {}
+    """回傳 forward 估值 dict;循環/資料不足/成長為負時帶『豁免原因』而非靜默 NaN。
+    輸入:收盤、近四季EPS、當下PER、近3年EPS成長%、近5年EPS成長%、月營收YoY%、是否循環。
+    豁免時 dict 只含 {未來估值: '⏸ 原因'},便於使用者一眼看懂為什麼沒 forward。"""
+    if cyclical:
+        return {"未來估值": "⏸ 循環(看PBR)"}
+    if pd.isna(close) or pd.isna(ttm_eps):
+        return {"未來估值": "⏸ 缺收盤/EPS"}
+    if ttm_eps <= 0:
+        return {"未來估值": "⏸ EPS≤0(虧損)"}
     g = e3 if pd.notna(e3) else e5
     if pd.isna(g):
-        return {}
-    g = max(G_FLOOR, min(G_CAP, float(g)))            # 防線性外推爆衝
+        return {"未來估值": "⏸ 無成長率"}
+    if g < 0:
+        return {"未來估值": f"⏸ 成長為負({g:.0f}%)"}
+    g = max(G_FLOOR, min(G_CAP, float(g)))            # 防線性外推爆衝(g>0 故只 cap 上限有效)
     g_cons = g
     if pd.notna(mo_yoy):                               # 保守:月營收動能若更低,以它為準
         g_cons = max(G_FLOOR, min(g, float(mo_yoy)))

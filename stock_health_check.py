@@ -138,6 +138,11 @@ def grade_quality(r):
     elif pd.notna(dr) and dr > 80:
         penalty += 5
         leak.append(f"⚠️高槓桿(負債{dr:.0f}%)")
+    # 存貨爆衝 vs 營收背離(八方案例:存貨+38.8 vs 營收+3.9)→ 需求軟警訊
+    inv_yoy = r.get("存貨年增%"); rev_yoy = r.get("最新月營收年增%")
+    if pd.notna(inv_yoy) and inv_yoy >= 40 and (pd.isna(rev_yoy) or rev_yoy < inv_yoy * 0.3):
+        penalty += 5
+        leak.append(f"⚠️存貨爆衝(存{inv_yoy:.0f}%vs營{rev_yoy if pd.notna(rev_yoy) else 0:.0f}%)")
     penalty = min(penalty, 15)              # 累計上限 15(避免雙條都中扣到評等崩盤)
     parts["⑪動態惡化扣分"] = -penalty
     s -= penalty
@@ -166,7 +171,8 @@ def main():
                   on="代號", how="left")
     for c in ["近四季ROE%", "獲利含金量", "5年營收CAGR%", "最新月營收年增%", "近四季EPS",
               "PER(自算)", "PE位階%", "毛利率位階%", "營益率位階%", "淨利率位階%", "PBR位階%",
-              "殖利率%", "收盤", "負債比%", "流動比%", "營益率%", "ROE5年均"]:
+              "殖利率%", "收盤", "負債比%", "流動比%", "存貨年增%", "營益率%", "ROE5年均",
+              "合理價", "偏便宜價", "深度買點價"]:
         if c in m.columns:
             m[c] = pd.to_numeric(m[c], errors="coerce")
 
@@ -194,6 +200,7 @@ def main():
                "ROE": r["近四季ROE%"], "ROE5年均": r.get("ROE5年均"),
                "ROIC估算": roic_proxy, "含金量": r["獲利含金量"],
                "負債比%": r.get("負債比%"), "流動比%": r.get("流動比%"),
+               "存貨年增%": r.get("存貨年增%"),
                "毛利位階": r["毛利率位階%"], "淨利位階": r["淨利率位階%"],
                "營收5yCAGR": r["5年營收CAGR%"], "月營收YoY": r["最新月營收年增%"],
                "PER": round(r["PER(自算)"], 1) if pd.notna(r["PER(自算)"]) else None,
@@ -206,6 +213,16 @@ def main():
         fwd = forward_metrics(r.get("收盤"), r.get("近四季EPS"), r.get("PER(自算)"),
                               e3, e5, r.get("最新月營收年增%"), cyc)
         out.update(fwd)
+        # 合理價鬧鐘:直接帶過(財報估值已用「歷史PE分位 × forward EPS」算好)
+        for k in ("合理價", "偏便宜價", "深度買點價"):
+            out[k] = r.get(k)
+        # 現價 vs 鬧鐘:離哪一層最近?幫你免心算
+        close = r.get("收盤")
+        if pd.notna(close) and pd.notna(out.get("合理價")):
+            if close <= out["深度買點價"]:    out["鬧鐘"] = "💎深度買點"
+            elif close <= out["偏便宜價"]:    out["鬧鐘"] = "🟢偏便宜"
+            elif close <= out["合理價"]:      out["鬧鐘"] = "🟡合理"
+            else:                              out["鬧鐘"] = "🔴貴於合理價"
         out.update(parts)
         rows.append(out)
 
@@ -218,9 +235,10 @@ def main():
                  "④淨利位階", "⑤營收成長", "①營收動能", "⑦EPS跟上營收",
                  "⑪動態惡化扣分"]
     base = ["代號", "名稱", "評等", "品質總分", "EPS5y%", "EPS近3y%",
-            "ROE", "ROE5年均", "ROIC估算", "負債比%", "流動比%", "含金量",
+            "ROE", "ROE5年均", "ROIC估算", "負債比%", "流動比%", "存貨年增%", "含金量",
             "毛利位階", "淨利位階", "營收5yCAGR", "月營收YoY", "PER", "PE位階", "PBR位階",
             "估值", "成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值",
+            "鬧鐘", "合理價", "偏便宜價", "深度買點價",
             "殖利率", "循環股", "主要漏洞"]
     for col in ["成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值"]:
         if col not in df.columns:

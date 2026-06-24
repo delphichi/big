@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       watch_file:
-        description: '名單檔 (預設核心50檔;改 tickers_us.txt 跑全258檔需Starter方案)'
+        description: '名單檔 (預設全258檔,增量每輪補45;指定 tickers_us_core.txt 只跑持倉)'
         required: false
-        default: 'tickers_us_core.txt'
+        default: 'tickers_us.txt'
   schedule:
-    # 每週一 10:00 UTC(美股財報更新後)
-    - cron: "0 10 * * 1"
+    # 每天 10:00 UTC — 增量模式每輪補 ~45 檔(FMP 免費 250/day),約 6 天跑完全 258
+    - cron: "0 10 * * *"
 
 permissions:
   contents: write
@@ -34,10 +34,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pandas openpyxl
 
-      - name: Run US health check (FMP)
+      - name: Run US health check (FMP, 增量)
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
-          US_WATCH_FILE: ${{ inputs.watch_file || 'tickers_us_core.txt' }}
+          US_WATCH_FILE: ${{ inputs.watch_file || 'tickers_us.txt' }}
+          US_MAX_FETCH: "45"
         run: python fetch_fundamentals_us.py
 
       - name: Commit report to repo

@@ -33,20 +33,48 @@ import pandas as pd
 import requests
 from forward_pe import forward_metrics      # 未來估值(Forward PE/PEG)單一真理來源,與台股同口徑
 
+BASE  = "https://financialmodelingprep.com/stable"     # 2025/8/31 後 v3 變 legacy,新用戶須用 stable
+
 WATCH = os.environ.get("US_WATCH_FILE", "tickers_us.txt")    # 可指定 tickers_us_core.txt
+CORE  = "tickers_us_core.txt"          # 持倉/曾持有,永遠優先抓
 OUT   = "data/美股體檢總表.xlsx"
 KEY   = os.environ.get("FMP_API_KEY", "")
-BASE  = "https://financialmodelingprep.com/stable"     # 2025/8/31 後 v3 變 legacy,新用戶須用 stable
+
 RATE_SLEEP = 0.25                  # 每檔間隔(starter ~300/分)
+MAX_FETCH  = int(os.environ.get("US_MAX_FETCH", "45"))   # 每輪上限(45×5≈225 calls < 免費250/day)
+FRESH_DAYS = int(os.environ.get("US_FRESH_DAYS", "30"))  # 體檢表內 N 天內的不重抓(增量省額度)
 
 
 def load_watch():
+    """合併 CORE(持倉優先)+ WATCH(全名單),去重保持順序。"""
     out = []
-    for line in open(WATCH, encoding="utf-8"):
-        line = line.split("#", 1)[0]
-        for tok in line.replace(",", " ").split():
-            out.append(tok.strip().upper())
+    for path in (CORE, WATCH):
+        if not os.path.exists(path):
+            continue
+        for line in open(path, encoding="utf-8"):
+            line = line.split("#", 1)[0]
+            for tok in line.replace(",", " ").split():
+                out.append(tok.strip().upper())
     return list(dict.fromkeys([t for t in out if t]))
+
+
+def load_existing():
+    """讀現有體檢總表 → (rows_dict, q_gm_dict)。供增量:已抓過的不重抓。"""
+    if not os.path.exists(OUT):
+        return {}, {}
+    try:
+        df = pd.read_excel(OUT, "體檢總表"); df["代號"] = df["代號"].astype(str)
+        rows = {r["代號"]: dict(r) for _, r in df.iterrows()}
+    except Exception:
+        rows = {}
+    qg = {}
+    try:
+        q = pd.read_excel(OUT, "逐季毛利率", index_col=0)
+        for k in q.index:
+            qg[str(k)] = q.loc[k].dropna().to_dict()
+    except Exception:
+        pass
+    return rows, qg
 
 
 def get(endpoint, **params):
@@ -268,11 +296,16 @@ def main():
         print("   設 GitHub Secret 名為 FMP_API_KEY,或本地 export FMP_API_KEY=...")
         return
     watch = load_watch()
-    print(f"美股觀察名單 {len(watch)} 檔,FMP 抓取...")
-    rows = []
-    q_gm_all = {}
+    existing, q_gm_all = load_existing()          # 增量:讀現有體檢表當快取
+    # 待抓 = 名單內但體檢表還沒有的(持倉/曾持有因在 CORE 排前面 → 優先);每輪上限 MAX_FETCH
+    todo = [s for s in watch if s not in existing][:MAX_FETCH]
+    print(f"美股名單 {len(watch)} 檔 | 已有 {len(existing)} | 本輪補抓 {len(todo)} 檔"
+          f"(上限 {MAX_FETCH},約 {len(todo)*5} calls)")
+    if not todo:
+        print("✓ 名單全部已抓過(增量完成);要強制更新請刪 data/美股體檢總表.xlsx 或調 US_MAX_FETCH")
+    rows = list(existing.values())                 # 先保留既有,新抓的 append
     debug_done = False
-    for i, sym in enumerate(watch, 1):
+    for i, sym in enumerate(todo, 1):
         try:
             if not debug_done:                 # 第一檔印 ttm/ratios 鍵名,供校準
                 _t = get("key-metrics-ttm", symbol=sym)
@@ -308,7 +341,7 @@ def main():
             r["主要漏洞"] = leak
             rows.append(r)
             if q_gm: q_gm_all[f"{sym} {r['名稱'][:18]}"] = dict(q_gm)
-            print(f"[{i}/{len(watch)}] {sym:6s} 分 {sc} {r['評等']} {r['估值']}")
+            print(f"[{i}/{len(todo)}] {sym:6s} 分 {sc} {r['評等']} {r['估值']}")
         except Exception as e:
             print(f"  ! {sym} 失敗:{e}")
         time.sleep(RATE_SLEEP)

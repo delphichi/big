@@ -86,6 +86,11 @@ def load_health():
             "EPS5y%": pd.to_numeric(r.get("EPS5y%"), errors="coerce"),
             "循環": "循環" in str(r.get("循環股", "")),
             "殖利率": pd.to_numeric(r.get("殖利率"), errors="coerce"),
+            # 動態惡化判斷用(現值 vs 歷史)
+            "ROE": pd.to_numeric(r.get("ROE"), errors="coerce"),
+            "ROE5年均": pd.to_numeric(r.get("ROE5年均"), errors="coerce"),
+            "負債比%": pd.to_numeric(r.get("負債比%"), errors="coerce"),
+            "流動比%": pd.to_numeric(r.get("流動比%"), errors="coerce"),
         }
     return out
 
@@ -190,10 +195,26 @@ def evaluate(pos, close, yoys, qgm, h):
             rebuy = "🟢 現價下不會買(" + "、".join(fails) + ")"
     sig["⑥反向測試"] = rebuy
 
+    # ── ⑦ 動態惡化(🟠 那篇文章說的「ROE 滑落 / 負債比飆升」)──
+    # 不看當下值,看「變化」:核心競爭力是不是正在流失
+    deteriorate = []
+    if h:
+        roe_cur = h.get("ROE"); roe_avg = h.get("ROE5年均")
+        if pd.notna(roe_cur) and pd.notna(roe_avg) and roe_avg >= 15 and roe_cur < roe_avg * 0.67:
+            # 5年均 ROE>=15 的好公司,當前 ROE 滑到 5年均的 67% 以下 = 滑落超過 1/3
+            deteriorate.append(f"ROE {roe_cur:.0f} 滑到5年均{roe_avg:.0f}的{roe_cur/roe_avg*100:.0f}%(< 67%警戒)")
+        dr = h.get("負債比%"); cr = h.get("流動比%")
+        if pd.notna(dr) and dr > 70:
+            if pd.notna(cr) and cr < 100:
+                deteriorate.append(f"負債比{dr:.0f}% > 70% 且流動比{cr:.0f}% < 100%(短期償債警報)")
+            elif dr > 80:
+                deteriorate.append(f"負債比{dr:.0f}% > 80%(高槓桿)")
+    sig["⑦動態惡化"] = ("🟠 " + "、".join(deteriorate)) if deteriorate else ""
+
     # ── 綜合燈號 ──
     if sig["①證偽"] or sig["②估值過熱"] or (rr is not None and rr < 1):
         light = "🔴 出場"
-    elif (rr is not None and rr < 2) or sig["④拐點逆轉"] or sig["⑤部位"]:
+    elif (rr is not None and rr < 2) or sig["④拐點逆轉"] or sig["⑤部位"] or sig["⑦動態惡化"]:
         light = "🟠 減碼"
     elif sig["⑥反向測試"]:
         light = "🟡 警戒"
@@ -274,6 +295,7 @@ def main():
             "①證偽": sig["①證偽"], "②估值過熱": sig["②估值過熱"],
             "③賠率": sig["③賠率"], "④拐點逆轉": sig["④拐點逆轉"],
             "⑤部位": sig["⑤部位"], "⑥反向測試": sig["⑥反向測試"],
+            "⑦動態惡化": sig["⑦動態惡化"],
         })
         print(f"  {sid} {pos['name']:6s} {light}  {sig['③賠率']}")
 

@@ -23,6 +23,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import pandas as pd
 import yaml
+from stop_anchors import analyze as stop_analyze   # 財報停損價計算器
 
 TOKEN      = os.environ.get("FINMIND_TOKEN", "")
 PORTFOLIO  = "portfolio.yaml"
@@ -216,6 +217,22 @@ def send_email(subject, html):
         print("寄信失敗:", e)
 
 
+def load_fin_tables():
+    """讀財報估值的兩個分頁(供 stop_anchors 算財報停損)。失敗回空 dict。"""
+    val, hist = {}, {}
+    try:
+        v = pd.read_excel(FIN_FILE, "財報估值比較"); v["代號"] = v["代號"].astype(str)
+        val = {r["代號"]: r for _, r in v.iterrows()}
+    except Exception as e:
+        print("讀財報估值比較失敗:", e)
+    try:
+        h = pd.read_excel(FIN_FILE, "相對歷史水位"); h["代號"] = h["代號"].astype(str)
+        hist = {r["代號"]: r for _, r in h.iterrows()}
+    except Exception as e:
+        print("讀相對歷史水位失敗:", e)
+    return val, hist
+
+
 def main():
     cfg = yaml.safe_load(open(PORTFOLIO, encoding="utf-8"))
     positions = cfg.get("positions", [])
@@ -223,7 +240,8 @@ def main():
         print("portfolio.yaml 無持倉"); return
     dl = make_loader()
     health = load_health()
-    print(f"監看 {len(positions)} 檔持倉,體檢覆蓋 {len(health)} 檔")
+    val_map, hist_map = load_fin_tables()
+    print(f"監看 {len(positions)} 檔持倉,體檢覆蓋 {len(health)} 檔,財報資料 {len(val_map)} 檔")
 
     rows = []
     for pos in positions:
@@ -233,10 +251,26 @@ def main():
         qgm = latest_q_gm(sid)
         h = health.get(sid)
         light, sig = evaluate(pos, close, yoys, qgm, h)
+        # 算財報停損(用三種估值錨)
+        rv = val_map.get(sid)
+        rhist = hist_map.get(sid)
+        # 體檢的 row(dict 形式)— 用既有 health 結構轉
+        rh_for_anchor = pd.Series({
+            "EPS近3y%": h["EPS近3y%"] if h else None,
+            "循環股": "循環" in str(h) if False else ("⚠️循環(看PBR)" if (h and h.get("循環")) else ""),
+        }) if h else None
+        if rv is not None:
+            sa = stop_analyze(sid, rv, rhist, rh_for_anchor, pos.get("停損價"))
+        else:
+            sa = {"建議主錨": None, "建議停損價": None, "選錨理由": "無財報", "停損建議": "",
+                  "PE法停損": None, "PBR法停損": None, "殖利率法停損": None}
         rows.append({
             "代號": sid, "名稱": pos["name"], "燈號": light,
             "現價": close, "成本(草稿)": pos.get("買進", {}).get("價"),
             "目標": pos.get("目標價"), "停損": pos.get("停損價"),
+            "建議停損(財報)": sa["建議停損價"], "建議主錨": sa["建議主錨"],
+            "PE法停損": sa["PE法停損"], "PBR法停損": sa["PBR法停損"], "殖利率法停損": sa["殖利率法停損"],
+            "停損校準建議": sa["停損建議"],
             "①證偽": sig["①證偽"], "②估值過熱": sig["②估值過熱"],
             "③賠率": sig["③賠率"], "④拐點逆轉": sig["④拐點逆轉"],
             "⑤部位": sig["⑤部位"], "⑥反向測試": sig["⑥反向測試"],

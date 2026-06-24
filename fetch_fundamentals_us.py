@@ -144,7 +144,13 @@ def fetch_one(sym):
     _dy = pick(prof0, "lastDividend", "dividendYield")  # profile 有 dividend
     if _dy and price and _dy > 1:  # 若是絕對股息金額,換算殖利率
         _dy = _dy / price
-    _debt = pick(ttm0, "debtToAssetsTTM", "totalDebtToAssetsTTM")
+    _debt = pick(ttm0, "debtToAssetsTTM", "totalDebtToAssetsTTM",
+                       "debtRatioTTM", "totalDebtToTotalAssetsTTM")
+    # 退路:若 TTM 鍵名變動抓不到,從最新 annual key-metrics 取
+    if _debt is None and km_a:
+        latest_km = km_a[0]
+        _debt = pick(latest_km, "debtToAssets", "totalDebtToAssets",
+                                "debtRatio", "totalDebtToTotalAssets")
 
     rev_l = rev[-1] if rev else None
     ni_l  = ni[-1] if ni else None
@@ -271,8 +277,13 @@ def main():
             if not debug_done:                 # 第一檔印 ttm/ratios 鍵名,供校準
                 _t = get("key-metrics-ttm", symbol=sym)
                 _r = get("ratios", symbol=sym, period="annual", limit=5)
-                print(f"DEBUG {sym} ttm keys:", list((_t[0] if _t else {}).keys())[:20])
-                print(f"DEBUG {sym} ratios keys:", list((_r[0] if _r else {}).keys())[:20])
+                _km = get("key-metrics", symbol=sym, period="annual", limit=1)
+                ttm_keys = list((_t[0] if _t else {}).keys())
+                km_keys  = list((_km[0] if _km else {}).keys())
+                debt_ttm = [k for k in ttm_keys if "debt" in k.lower() or "leverage" in k.lower()]
+                debt_km  = [k for k in km_keys  if "debt" in k.lower() or "leverage" in k.lower()]
+                print(f"DEBUG {sym} ttm debt keys:", debt_ttm)
+                print(f"DEBUG {sym} km annual debt keys:", debt_km)
                 debug_done = True
             r = fetch_one(sym)
             v_eps = r.pop("_eps_series")

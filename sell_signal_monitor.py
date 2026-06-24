@@ -146,7 +146,8 @@ def evaluate(pos, close, yoys, qgm, h):
         elif rr < 2:   rr_txt = f"🟡 賠率{rr:.2f} 考慮減碼"
         else:          rr_txt = f"🟢 賠率{rr:.2f} 持有"
     elif tgt and stop and close and close <= stop:
-        rr_txt = f"🔴 跌破停損價{stop}"
+        rr_txt = f"🔴 跌破停損價{stop}(現價{close})"
+        rr = -1            # ★ 跌破停損 = 賠率歸負,確保下方觸發 🔴 出場(原本 None 會漏報)
     sig["③賠率"] = rr_txt
     sig["_rr"] = rr
 

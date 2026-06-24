@@ -40,14 +40,6 @@ jobs:
           MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python pe_buyzone_monitor.py
 
-      - name: Run sell-signal monitor (持倉賣點)
-        env:
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          MAIL_TO: ${{ secrets.MAIL_TO }}
-        run: python sell_signal_monitor.py || echo "賣點監看失敗,繼續"
-
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v6
@@ -62,11 +54,11 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/PE買入區間監看.xlsx data/賣出訊號監看.xlsx tickers_watch.txt || true
+          git add data/PE買入區間監看.xlsx tickers_watch.txt || true
           if git diff --staged --quiet; then
             echo "無變更,略過 commit"; exit 0
           fi
-          git commit -m "data: PE買入區間 + 賣出訊號監看 $(date -u +%Y%m%d)"
+          git commit -m "data: PE買入區間監看 $(date -u +%Y%m%d)"
           for i in 1 2 3 4 5; do
             if git pull --rebase --autostash origin main && git push; then
               echo "pushed"; exit 0

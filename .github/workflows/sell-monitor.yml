@@ -1,0 +1,53 @@
+name: 持倉賣出訊號監看
+
+on:
+  workflow_dispatch:          # 可單獨手動測試(只跑 portfolio.yaml 的持倉,7 檔秒跑)
+  schedule:
+    # 09:10 UTC = 台北 17:10(收盤後,接在買點監看之後);週一~週五
+    - cron: "10 9 * * 1-5"
+
+permissions:
+  contents: write
+
+jobs:
+  sell-monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15           # 只看持倉(目前 7 檔),API 量小,很快
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install FinMind pandas openpyxl requests pyyaml
+
+      - name: Run sell-signal monitor
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python sell_signal_monitor.py
+
+      - name: Commit report to repo
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/賣出訊號監看.xlsx || true
+          if git diff --staged --quiet; then echo "無變更"; exit 0; fi
+          git commit -m "data: 持倉賣出訊號監看 $(date -u +%Y%m%d)"
+          for i in 1 2 3 4 5; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" -q || true
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then echo pushed; exit 0; fi
+            echo "push 重試 $i ..."; sleep 6
+          done
+          echo "push 最終失敗"; exit 1

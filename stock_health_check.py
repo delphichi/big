@@ -145,8 +145,9 @@ def main():
                   on="代號", how="left")
     for c in ["近四季ROE%", "獲利含金量", "5年營收CAGR%", "最新月營收年增%", "近四季EPS",
               "PER(自算)", "PE位階%", "毛利率位階%", "營益率位階%", "淨利率位階%", "PBR位階%",
-              "殖利率%", "收盤"]:
-        m[c] = pd.to_numeric(m[c], errors="coerce")
+              "殖利率%", "收盤", "負債比%", "營益率%"]:
+        if c in m.columns:
+            m[c] = pd.to_numeric(m[c], errors="coerce")
 
     rows = []
     for _, r in m.iterrows():
@@ -160,10 +161,16 @@ def main():
         else:
             score, parts, leak = grade_quality(rr)
             grade = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
+        # ROIC 近似:用 ROE × (1 - 負債比) → 把槓桿剝掉,接近「無槓桿資本回報」
+        # 比真實 ROIC 保守(沒考慮稅後營業利益和投入資本細節),但能分辨「靠槓桿」vs「真實效率」
+        # 注意:真實 ROIC 應該是 NOPAT / 投入資本(權益+長債),需 raw 財報重算,下版納入
+        roic_proxy = None
+        if pd.notna(r["近四季ROE%"]) and pd.notna(r.get("負債比%")):
+            roic_proxy = round(float(r["近四季ROE%"]) * (1 - float(r["負債比%"]) / 100), 1)
         out = {"代號": c, "名稱": r["名稱"], "評等": grade, "品質總分": score,
                "EPS5y%": round(e5, 1) if pd.notna(e5) else None,
                "EPS近3y%": round(e3, 1) if pd.notna(e3) else None,
-               "ROE": r["近四季ROE%"], "含金量": r["獲利含金量"],
+               "ROE": r["近四季ROE%"], "ROIC估算": roic_proxy, "含金量": r["獲利含金量"],
                "毛利位階": r["毛利率位階%"], "淨利位階": r["淨利率位階%"],
                "營收5yCAGR": r["5年營收CAGR%"], "月營收YoY": r["最新月營收年增%"],
                "PER": round(r["PER(自算)"], 1) if pd.notna(r["PER(自算)"]) else None,
@@ -186,7 +193,7 @@ def main():
 
     part_cols = ["⑥EPS成長", "⑧含金量", "⑨ROE", "②毛利位階", "③營益位階",
                  "④淨利位階", "⑤營收成長", "①營收動能", "⑦EPS跟上營收"]
-    base = ["代號", "名稱", "評等", "品質總分", "EPS5y%", "EPS近3y%", "ROE", "含金量",
+    base = ["代號", "名稱", "評等", "品質總分", "EPS5y%", "EPS近3y%", "ROE", "ROIC估算", "含金量",
             "毛利位階", "淨利位階", "營收5yCAGR", "月營收YoY", "PER", "PE位階", "PBR位階",
             "估值", "成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值",
             "殖利率", "循環股", "主要漏洞"]

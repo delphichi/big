@@ -423,6 +423,16 @@ def summary_row(sid, name, raw):
         row["殖利率%"] = p.get("dividend_yield")
     # 成長:最新月營收年增
     row["最新月營收年增%"] = revenue_yoy(raw)
+    # ROIC 真實版:近四季營業利益 × 稅後 / 最新季權益
+    # (簡化版投入資本只用權益;真實 ROIC 還要加長債,但台股財報長債需另外拆,先用權益保守估)
+    # 用途:分辨「資本配置有效」vs「越投越爛」— 例:統一超這種大資本支出股
+    if not perf.empty and "_營益" in perf.columns and "_權益" in perf.columns:
+        op4 = perf["_營益"].dropna().tail(4).sum()
+        eqL = perf["_權益"].dropna()
+        if len(eqL) and eqL.iloc[-1] and op4:
+            # NOPAT 假設稅率 20%(台股營所稅);除以期末權益
+            roic = (op4 * 0.8) / float(eqL.iloc[-1]) * 100
+            row["ROIC%(真實)"] = round(float(roic), 1)
     # 未來估值(Forward PE/PEG)— 與體檢/拐點同口徑(forward_pe 共用模組);循環股自動豁免
     ev = [eps_year[y] for y in sorted(eps_year)] if eps_year else []
     if len(ev) >= 2:
@@ -495,7 +505,7 @@ def build_output(namemap):
     df = pd.DataFrame(rows)
     cols = ["代號", "名稱", "金融", "最新季",
             "5年營收CAGR%", "5年平均淨利率%", "5年平均ROE%",
-            "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%",
+            "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%", "ROIC%(真實)",
             "負債比%", "流動比%", "獲利含金量", "近四季自由現金流(億)",
             "收盤", "市值(億)", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%",
             "成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值"]

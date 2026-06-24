@@ -22,6 +22,18 @@ GMAIL_PASS = os.environ.get("GMAIL_APP_PASSWORD", "")
 MAIL_TO    = os.environ.get("MAIL_TO", "") or GMAIL_USER
 PORTFOLIO  = "portfolio_us.yaml"
 OUT        = "data/美股_持倉季度追蹤.xlsx"
+HEALTH_US  = "data/美股體檢總表.xlsx"   # 取真實 ROIC(FMP 來源)做資本效率證偽
+
+
+def load_roic():
+    """讀美股體檢總表 → {代號: ROIC%}。無檔回空。美股 ROIC 是 FMP 真實值。"""
+    if not os.path.exists(HEALTH_US):
+        return {}
+    try:
+        h = pd.read_excel(HEALTH_US, "體檢總表"); h["代號"] = h["代號"].astype(str)
+        return {r["代號"]: pd.to_numeric(r.get("ROIC%"), errors="coerce") for _, r in h.iterrows()}
+    except Exception:
+        return {}
 
 
 def fetch_quarterly(sym):
@@ -102,11 +114,19 @@ def main():
     if not positions:
         print("portfolio_us.yaml 無持倉,跳過"); return
     print(f"追蹤 {len(positions)} 檔美股持倉")
+    roic_map = load_roic()
     rows, hits = [], []
     for pos in positions:
         sym = pos["sym"]
         q = fetch_quarterly(sym)
         st, dt, trig, ryoy, eyoy, gm = evaluate(pos, q)
+        # 證偽_ROIC:美股有真實 ROIC,跌破門檻 = 資本配置失血(分辨 Berkshire vs 錢坑)
+        thr_roic = pos.get("證偽_ROIC", {}).get("跌破")
+        roic_act = roic_map.get(sym)
+        if thr_roic and roic_act is not None and not pd.isna(roic_act) and roic_act < thr_roic:
+            msg = f"🚨 ROIC {roic_act:.1f}% 跌破 {thr_roic}%(資本效率惡化)"
+            dt = msg if dt == "持續觀察" else f"{dt}; {msg}"
+            st = "🚨 觸發證偽"; trig = True
         rows.append({
             "代號": sym, "名稱": pos["name"], "分類": pos.get("分類", ""), "狀態": st,
             "近4季營收YoY": " / ".join(f"{v:+.0f}%" for v in ryoy) if ryoy else "—",

@@ -31,6 +31,7 @@ import os, time
 import numpy as np
 import pandas as pd
 import requests
+from forward_pe import forward_metrics      # 未來估值(Forward PE/PEG)單一真理來源,與台股同口徑
 
 WATCH = os.environ.get("US_WATCH_FILE", "tickers_us.txt")    # 可指定 tickers_us_core.txt
 OUT   = "data/美股體檢總表.xlsx"
@@ -166,6 +167,7 @@ def fetch_one(sym):
         "PBR位階": historical_pctl(hist_pb, cur_pb),
         "PEG":  round(_peg, 2) if _peg else np.nan,
         "殖利率%": round(_dy * 100, 2) if _dy else 0,
+        "_eps_l": eps_l,
         "_eps_series": eps,
         "_q_gm": q_gm,
     }
@@ -251,12 +253,23 @@ def main():
             r = fetch_one(sym)
             v_eps = r.pop("_eps_series")
             q_gm  = r.pop("_q_gm")
+            r_eps_l = r.pop("_eps_l", None)
             cyc = is_cyclical(v_eps)
             sc, leak = grade(r)
             r["品質總分"] = sc
             r["評等"] = "A" if sc >= 80 else "B" if sc >= 65 else "C" if sc >= 50 else "D"
             r["估值"] = valuation_tag(r["PE位階"], r["PBR位階"])
             r["循環股"] = "⚠️循環(看PBR)" if cyc else ""
+            # PEG 自算 + Forward PE(與台股同口徑 forward_pe 模組;美股無月營收→保守情境傳 None)
+            e3 = r.get("EPS3y%"); e5 = r.get("EPS5y%")
+            per = r.get("PER"); close = r.get("收盤"); ttm_eps = r_eps_l
+            if per is not None and e3 is not None and not pd.isna(per) and not pd.isna(e3) and e3 > 0:
+                r["PEG"] = round(per / e3, 2)
+            fwd = forward_metrics(close, ttm_eps, per, e3, e5, None, cyc)
+            for k, vv in fwd.items():
+                if k == "PEG" and not pd.isna(r.get("PEG", float("nan"))):
+                    continue          # PEG 已自算,不覆蓋
+                r[k] = vv
             r["主要漏洞"] = leak
             rows.append(r)
             if q_gm: q_gm_all[f"{sym} {r['名稱'][:18]}"] = dict(q_gm)
@@ -271,6 +284,7 @@ def main():
     df = pd.DataFrame(rows).sort_values("品質總分", ascending=False)
     cols = ["代號", "名稱", "產業", "評等", "品質總分", "EPS5y%", "EPS3y%", "ROE%", "ROIC%", "含金量",
             "毛利率%", "淨利率%", "營收CAGR%", "PER", "PE位階", "PBR", "PBR位階", "PEG",
+            "成長率g%", "預估明年EPS", "ForwardPE", "未來估值",
             "估值", "殖利率%", "市值(億美)", "循環股", "主要漏洞"]
     df = df[[c for c in cols if c in df.columns]]
     os.makedirs("data", exist_ok=True)

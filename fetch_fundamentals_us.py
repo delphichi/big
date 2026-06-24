@@ -126,6 +126,11 @@ def fetch_one(sym):
     km_a_sorted = list(reversed(km_a))
     hist_pe = [pick(r, "peRatio", "priceEarningsRatio", "priceToEarningsRatio") for r in km_a_sorted]
     hist_pb = [pick(r, "pbRatio", "priceToBookRatio", "priceToBookValueRatio") for r in km_a_sorted]
+    # 5 年歷史 ROE(供動態惡化判斷)— 取近 5 年平均
+    hist_roe = [pick(r, "roe", "returnOnEquity") for r in km_a_sorted]
+    roe_avg = np.mean([x for x in hist_roe if x is not None]) * 100 if any(x is not None for x in hist_roe) else None
+    # 流動比(FMP currentRatio TTM)
+    _cur = pick(ttm0, "currentRatioTTM", "currentRatio")
     # TTM PER/PBR:stable 的 key-metrics-ttm 不含,改自算(profile.price ÷ EPS, 跟台股同款)
     price = prof0.get("price") or prof0.get("regularMarketPrice")
     cur_pe = (price / eps[-1]) if (price and eps and eps[-1] and eps[-1] > 0) else None
@@ -161,6 +166,8 @@ def fetch_one(sym):
         "ROIC%":  round(_roic * 100, 1) if _roic else np.nan,
         "含金量": round(ocf[-1] / ni_l, 2) if ocf and ni_l else np.nan,
         "負債比%": round(_debt * 100, 1) if _debt else np.nan,
+        "流動比": round(_cur, 2) if _cur else np.nan,
+        "ROE5年均%": round(roe_avg, 1) if roe_avg else np.nan,
         "PER":  round(cur_pe, 1) if cur_pe else np.nan,
         "PE位階": historical_pctl(hist_pe, cur_pe),
         "PBR":  round(cur_pb, 2) if cur_pb else np.nan,
@@ -228,6 +235,23 @@ def grade(r):
     else:
         p = 4 if (pd.notna(e5) and e5 > 0) else 0
     s += p
+    # ⑪ 動態惡化扣分(同台股,最高扣 -15)
+    penalty = 0
+    roe_cur = r.get("ROE%"); roe_avg = r.get("ROE5年均%")
+    if pd.notna(roe_cur) and pd.notna(roe_avg) and roe_avg >= 15 and roe_cur < roe_avg * 0.67:
+        penalty += 10
+        leak.append(f"⚠️ROE滑落({roe_cur:.0f}<5年均{roe_avg:.0f}×67%)")
+    dr = r.get("負債比%"); cr_us = r.get("流動比")
+    # US 流動比是小數(1.5 = 150%),轉成百分比比較;若無 currentRatio 退而求其次只看負債
+    cur_pct = cr_us * 100 if pd.notna(cr_us) else None
+    if pd.notna(dr) and dr > 70 and pd.notna(cur_pct) and cur_pct < 100:
+        penalty += 10
+        leak.append(f"⚠️短期償債警報(負債{dr:.0f}+流動{cur_pct:.0f})")
+    elif pd.notna(dr) and dr > 80:
+        penalty += 5
+        leak.append(f"⚠️高槓桿(負債{dr:.0f}%)")
+    penalty = min(penalty, 15)
+    s -= penalty
     return round(s, 1), "、".join(leak[:3])
 
 
@@ -282,7 +306,8 @@ def main():
         print("⚠️ 0 檔成功,不產出 Excel(可能是 API key/端點問題,先查 log)")
         return
     df = pd.DataFrame(rows).sort_values("品質總分", ascending=False)
-    cols = ["代號", "名稱", "產業", "評等", "品質總分", "EPS5y%", "EPS3y%", "ROE%", "ROIC%", "含金量",
+    cols = ["代號", "名稱", "產業", "評等", "品質總分", "EPS5y%", "EPS3y%",
+            "ROE%", "ROE5年均%", "ROIC%", "負債比%", "流動比", "含金量",
             "毛利率%", "淨利率%", "營收CAGR%", "PER", "PE位階", "PBR", "PBR位階", "PEG",
             "成長率g%", "預估明年EPS", "ForwardPE", "未來估值",
             "估值", "殖利率%", "市值(億美)", "循環股", "主要漏洞"]

@@ -171,7 +171,8 @@ def main():
                   on="代號", how="left")
     for c in ["近四季ROE%", "獲利含金量", "5年營收CAGR%", "最新月營收年增%", "近四季EPS",
               "PER(自算)", "PE位階%", "毛利率位階%", "營益率位階%", "淨利率位階%", "PBR位階%",
-              "殖利率%", "收盤", "負債比%", "流動比%", "存貨年增%", "營益率%", "ROE5年均"]:
+              "殖利率%", "收盤", "負債比%", "流動比%", "存貨年增%", "營益率%", "ROE5年均",
+              "合理價", "偏便宜價", "深度買點價"]:
         if c in m.columns:
             m[c] = pd.to_numeric(m[c], errors="coerce")
 
@@ -212,6 +213,16 @@ def main():
         fwd = forward_metrics(r.get("收盤"), r.get("近四季EPS"), r.get("PER(自算)"),
                               e3, e5, r.get("最新月營收年增%"), cyc)
         out.update(fwd)
+        # 合理價鬧鐘:直接帶過(財報估值已用「歷史PE分位 × forward EPS」算好)
+        for k in ("合理價", "偏便宜價", "深度買點價"):
+            out[k] = r.get(k)
+        # 現價 vs 鬧鐘:離哪一層最近?幫你免心算
+        close = r.get("收盤")
+        if pd.notna(close) and pd.notna(out.get("合理價")):
+            if close <= out["深度買點價"]:    out["鬧鐘"] = "💎深度買點"
+            elif close <= out["偏便宜價"]:    out["鬧鐘"] = "🟢偏便宜"
+            elif close <= out["合理價"]:      out["鬧鐘"] = "🟡合理"
+            else:                              out["鬧鐘"] = "🔴貴於合理價"
         out.update(parts)
         rows.append(out)
 
@@ -227,6 +238,7 @@ def main():
             "ROE", "ROE5年均", "ROIC估算", "負債比%", "流動比%", "存貨年增%", "含金量",
             "毛利位階", "淨利位階", "營收5yCAGR", "月營收YoY", "PER", "PE位階", "PBR位階",
             "估值", "成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值",
+            "鬧鐘", "合理價", "偏便宜價", "深度買點價",
             "殖利率", "循環股", "主要漏洞"]
     for col in ["成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值"]:
         if col not in df.columns:

@@ -345,12 +345,15 @@ def hist_levels(sid, name, perf, per_df, per_ser):
         series = [r[key] for r in ttm]
         cur = series[-1] if series else None
         lvl(series, cur, label)
-    # PER:自算序列
+    # PER:自算序列(順便存 P10/P25/P50 三層 PE 分位點,供「合理價鬧鐘」用)
     if per_ser is not None and not per_ser.empty:
         s = per_ser["PER"].replace([float("inf")], pd.NA).dropna()
         s = s[s > 0]
         if len(s):
             lvl(list(s), float(s.iloc[-1]), "PER", 2)
+            out["PE_P10"] = round(float(s.quantile(0.10)), 2)   # 歷史低檔(深度買點)
+            out["PE_P25"] = round(float(s.quantile(0.25)), 2)   # 偏便宜
+            out["PE_P50"] = round(float(s.quantile(0.50)), 2)   # 中位合理
     # PBR / 殖利率:per_pbr
     if per_df is not None and not per_df.empty:
         p = per_df.sort_values("date")
@@ -450,6 +453,14 @@ def summary_row(sid, name, raw):
         for k, vv in fwd.items():
             row[k] = vv
     hist = hist_levels(sid, name, perf, raw.get("PER"), ps) if not perf.empty else {"代號": sid, "名稱": name}
+    # 合理價鬧鐘:歷史 PE 分位 × forward EPS = 三層觸發價(取代「PE 位階」相對排名,給絕對價位)
+    # forward EPS 優先用 預估明年EPS,缺則退回 近四季EPS;循環股(已被 forward_pe 豁免)用近四季
+    fwd_eps = row.get("預估明年EPS") or row.get("近四季EPS")
+    if pd.notna(fwd_eps) and fwd_eps > 0:
+        for q, label in (("PE_P50", "合理價"), ("PE_P25", "偏便宜價"), ("PE_P10", "深度買點價")):
+            pe_q = hist.get(q)
+            if pe_q is not None and pd.notna(pe_q):
+                row[label] = round(float(fwd_eps) * float(pe_q), 1)
     return row, perf, rev_year, eps_year, hist
 
 
@@ -499,8 +510,17 @@ def build_output(namemap):
                                              row.get("PER(自算)"), e3, e5,
                                              row.get("最新月營收年增%"), cyc).items():
                     row[k] = vv
+        # 合理價鬧鐘:舊快取若無,從 hist 的 PE_Pxx × forward EPS 補算(免重抓財報)
+        hist_c = c.get("hist", {"代號": sid})
+        if "合理價" not in row:
+            fwd_eps = row.get("預估明年EPS") or row.get("近四季EPS")
+            if pd.notna(fwd_eps) and fwd_eps and fwd_eps > 0:
+                for q, label in (("PE_P50", "合理價"), ("PE_P25", "偏便宜價"), ("PE_P10", "深度買點價")):
+                    pe_q = hist_c.get(q)
+                    if pe_q is not None and pd.notna(pe_q):
+                        row[label] = round(float(fwd_eps) * float(pe_q), 1)
         rows.append(row)
-        hists.append(c.get("hist", {"代號": sid}))
+        hists.append(hist_c)
         name = namemap.get(sid, sid)
         if c.get("rev_year"): rev_years[f"{sid} {name}"] = c["rev_year"]
         if ey: eps_years[f"{sid} {name}"] = ey
@@ -514,7 +534,8 @@ def build_output(namemap):
             "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%", "ROIC%(真實)",
             "負債比%", "流動比%", "存貨年增%", "獲利含金量", "近四季自由現金流(億)",
             "收盤", "市值(億)", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%",
-            "成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值"]
+            "成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值",
+            "合理價", "偏便宜價", "深度買點價"]
     df = df[[c for c in cols if c in df.columns]]
     TEXT_COLS = ("代號", "名稱", "金融", "最新季", "未來估值")
     for col in df.columns:

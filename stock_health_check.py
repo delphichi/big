@@ -22,6 +22,7 @@
 輸出: data/台股_體檢總表.xlsx
 """
 import numpy as np, pandas as pd
+from forward_pe import forward_metrics      # 單一真理來源(體檢/拐點/財報估值/0050預測共用)
 
 SRC = "data/台股財報估值.xlsx"
 OUT = "data/台股_體檢總表.xlsx"
@@ -133,44 +134,6 @@ def valuation_tag(pe, pbr):
     if m <= 55: return "🟡合理"
     if m <= 80: return "🟠偏貴"
     return "🔴過熱"
-
-
-def forward_metrics(close, ttm_eps, per, e3, e5, mo_yoy, cyclical):
-    """用『未來 EPS』修正當下 PE — 股票買的是未來不是過去。
-    成長率 g 來源:近3年EPS CAGR(主),沒有則退 5年;cap [-30, +60] 防爆衝外推。
-    保守情境 g_保守 = min(g, 月營收YoY) — 月營收領先 EPS,若動能轉弱先反映。
-    循環股豁免:獲利上下震盪,線性外推無意義 → 一律 None,回頭看 PBR。
-    回傳:成長率g% / 預估明年EPS / ForwardPE(中性) / ForwardPE保守 / PEG / 未來估值標籤。"""
-    if cyclical or pd.isna(close) or pd.isna(ttm_eps) or ttm_eps <= 0:
-        return {}
-    g = e3 if pd.notna(e3) else e5
-    if pd.isna(g):
-        return {}
-    g = max(-30.0, min(60.0, float(g)))               # 防線性外推爆衝
-    g_cons = g
-    if pd.notna(mo_yoy):                               # 保守:月營收動能若更低,以它為準
-        g_cons = max(-30.0, min(g, float(mo_yoy)))
-    fwd_eps = ttm_eps * (1 + g / 100)
-    fwd_eps_c = ttm_eps * (1 + g_cons / 100)
-    fpe   = (close / fwd_eps)   if fwd_eps   > 0 else None
-    fpe_c = (close / fwd_eps_c) if fwd_eps_c > 0 else None
-    peg = (per / g) if (pd.notna(per) and g > 0) else None
-    return {"成長率g%": round(g, 1),
-            "預估明年EPS": round(fwd_eps, 2),
-            "ForwardPE": round(fpe, 1) if fpe else None,
-            "ForwardPE保守": round(fpe_c, 1) if fpe_c else None,
-            "PEG": round(peg, 2) if peg else None,
-            "未來估值": forward_tag(fpe, peg)}
-
-
-def forward_tag(fpe, peg):
-    """Forward PE + PEG 綜合標籤(用未來 EPS 看現價貴不貴)。"""
-    if fpe is None: return "—"
-    if peg is not None and 0 < peg < 1: return "🟢成長未反映"   # PEG<1:成長還沒被 price in
-    if fpe < 15: return "🟢未來便宜"
-    if fpe < 22: return "🟡未來合理"
-    if fpe < 32: return "🟠未來偏貴"
-    return "🔴未來過熱"
 
 
 def main():

@@ -200,19 +200,27 @@ def load_health():
             "PBR位階": pd.to_numeric(r.get("PBR位階"), errors="coerce"),
             "成長率g": pd.to_numeric(r.get("成長率g%"), errors="coerce"),
             "循環": "循環" in str(r.get("循環股", "")),
+            "動態惡化": pd.to_numeric(r.get("⑪動態惡化扣分"), errors="coerce"),
+            "負債比": pd.to_numeric(r.get("負債比%"), errors="coerce"),
+            "流動比": pd.to_numeric(r.get("流動比%"), errors="coerce"),
         }
     return out
 
 
 def classify(r, h):
     """三層訊號:⭐優質買點 / ⚠️便宜陷阱 / 🔄循環買點(PBR) / (空=非買點)。
-    r=今日PE分析(含PE位階%);h=該檔體檢(可能None)。"""
+    r=今日PE分析(含PE位階%);h=該檔體檢(可能None)。
+    ⑪ 動態惡化:扣 ≤-10(短期償債警報/ROE滑落)→ 一律標便宜陷阱(財務正在變差)。"""
     pe_buy = r["PE位階%"] <= BUY_PCTL
     if not h:                                     # 無體檢資料
         return "❔未評(無體檢)" if pe_buy else ""
     if h["評等"] == "金融🏦":                       # 金融股:不評分,看PBR/殖利率自行判斷
         return "🏦金融(看PBR/殖利率)" if pe_buy else ""
     grade = h["評等"]; g = h["含金量"]; e3 = h["EPS3y"]
+    # ⑪ 動態惡化前置 guard:扣 ≤-10(短期償債或 ROE 滑落)= 財務正在變差,即使便宜也是陷阱
+    pen = h.get("動態惡化")
+    if pd.notna(pen) and pen <= -10:
+        return "⚠️便宜陷阱(動態惡化)" if (pe_buy or (h["循環"] and pd.notna(h["PBR位階"]) and h["PBR位階"] <= BUY_PCTL)) else ""
     if h["循環"]:                                  # 循環股:PER失真,改看PBR位階
         pbr = h["PBR位階"]
         if pd.notna(pbr) and pbr <= BUY_PCTL:
@@ -295,6 +303,9 @@ def main():
             row["EPS近3y%"] = h["EPS3y"] if h else None
             row["PBR位階"] = h["PBR位階"] if h else None
             row["循環"] = "⚠️" if (h and h["循環"]) else ""
+            row["動態惡化"] = h.get("動態惡化") if h else None
+            row["負債比%"] = h.get("負債比") if h else None
+            row["流動比%"] = h.get("流動比") if h else None
             rows.append(row)
             fw = f" {row['未來訊號']}" if row["未來訊號"] else ""
             print(f"[{i}/{len(watch)}] {sid} {nm.get(sid,sid):6s} 位階{r['PE位階%']:>3} {sig or ''}{fw}")
@@ -317,7 +328,8 @@ def main():
 
     view = ["代號", "名稱", "訊號", "未來訊號", "評等", "收盤", "PER現(自算)", "PE位階%",
             "成長率g%", "預估明年EPS", "ForwardPE現", "ForwardPE位階%", "PBR位階",
-            "含金量", "EPS近3y%", "循環", "買入價(P20×EPS)", "距買入區間%", "殖利率%"]
+            "含金量", "EPS近3y%", "循環", "動態惡化", "負債比%", "流動比%",
+            "買入價(P20×EPS)", "距買入區間%", "殖利率%"]
     def v(d):
         return d[[c for c in view if c in d.columns]]
 

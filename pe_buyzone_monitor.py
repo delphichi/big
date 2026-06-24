@@ -203,6 +203,7 @@ def load_health():
             "動態惡化": pd.to_numeric(r.get("⑪動態惡化扣分"), errors="coerce"),
             "負債比": pd.to_numeric(r.get("負債比%"), errors="coerce"),
             "流動比": pd.to_numeric(r.get("流動比%"), errors="coerce"),
+            "存貨年增": pd.to_numeric(r.get("存貨年增%"), errors="coerce"),
         }
     return out
 
@@ -306,6 +307,7 @@ def main():
             row["動態惡化"] = h.get("動態惡化") if h else None
             row["負債比%"] = h.get("負債比") if h else None
             row["流動比%"] = h.get("流動比") if h else None
+            row["存貨年增%"] = h.get("存貨年增") if h else None
             rows.append(row)
             fw = f" {row['未來訊號']}" if row["未來訊號"] else ""
             print(f"[{i}/{len(watch)}] {sid} {nm.get(sid,sid):6s} 位階{r['PE位階%']:>3} {sig or ''}{fw}")
@@ -328,7 +330,7 @@ def main():
 
     view = ["代號", "名稱", "訊號", "未來訊號", "評等", "收盤", "PER現(自算)", "PE位階%",
             "成長率g%", "預估明年EPS", "ForwardPE現", "ForwardPE位階%", "PBR位階",
-            "含金量", "EPS近3y%", "循環", "動態惡化", "負債比%", "流動比%",
+            "含金量", "EPS近3y%", "循環", "動態惡化", "負債比%", "流動比%", "存貨年增%",
             "買入價(P20×EPS)", "距買入區間%", "殖利率%"]
     def v(d):
         return d[[c for c in view if c in d.columns]]

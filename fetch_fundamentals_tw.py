@@ -254,6 +254,7 @@ def performance(raw):
     ca   = pick(bal, "CurrentAssets")
     cl   = pick(bal, "CurrentLiabilities")
     cap  = pick(bal, "CommonStocks", "CommonStock", "CapitalStock", "Capital", "ShareCapital")
+    inv  = pick(bal, "Inventories", "Inventory")           # 存貨:用於計算存貨年增vs營收年增是否背離
 
     # 現金流量表為 YTD 累計 → 先轉單季,之後加總近四季才正確
     ocf  = decum(pick(cf, "CashFlowsFromOperatingActivities",
@@ -279,6 +280,7 @@ def performance(raw):
     m["營業現金流(億)"] = (ocf / 1e8).round(1)
     m["自由現金流(億)"] = ((ocf + capex) / 1e8).round(1)   # capex 在現金流量表多為負值
     m["_股本"]       = cap                                # 台股股本(元),÷10 為流通股數
+    m["_存貨"]       = inv                                # 存貨原值(元),供算存貨年增與營收背離
     return m
 
 
@@ -394,6 +396,10 @@ def summary_row(sid, name, raw):
         # 財務結構(最新季)
         row["負債比%"] = perf["負債比%"].dropna().iloc[-1] if perf["負債比%"].notna().any() else None
         row["流動比%"] = perf["流動比%"].dropna().iloc[-1] if perf["流動比%"].notna().any() else None
+        # 存貨年增%:最新季存貨 vs 去年同季,>40%且同期營收年增<10% = 需求軟警訊(八方案例)
+        inv_ser = perf["_存貨"].dropna() if "_存貨" in perf.columns else pd.Series(dtype=float)
+        if len(inv_ser) >= 5 and inv_ser.iloc[-5] > 0:
+            row["存貨年增%"] = round((inv_ser.iloc[-1] / inv_ser.iloc[-5] - 1) * 100, 1)
         # 現金流照妖鏡(近四季營業現金流 ÷ 近四季淨利)
         ocf4 = last4["_OCF"].dropna().sum()
         if ni4:
@@ -506,7 +512,7 @@ def build_output(namemap):
     cols = ["代號", "名稱", "金融", "最新季",
             "5年營收CAGR%", "5年平均淨利率%", "5年平均ROE%",
             "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%", "ROIC%(真實)",
-            "負債比%", "流動比%", "獲利含金量", "近四季自由現金流(億)",
+            "負債比%", "流動比%", "存貨年增%", "獲利含金量", "近四季自由現金流(億)",
             "收盤", "市值(億)", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%",
             "成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值"]
     df = df[[c for c in cols if c in df.columns]]

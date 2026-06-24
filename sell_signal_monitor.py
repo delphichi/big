@@ -86,6 +86,7 @@ def load_health():
             "EPS5y%": pd.to_numeric(r.get("EPS5y%"), errors="coerce"),
             "循環": "循環" in str(r.get("循環股", "")),
             "殖利率": pd.to_numeric(r.get("殖利率"), errors="coerce"),
+            "存貨年增%": pd.to_numeric(r.get("存貨年增%"), errors="coerce"),
             # 動態惡化判斷用(現值 vs 歷史)
             "ROE": pd.to_numeric(r.get("ROE"), errors="coerce"),
             "ROE5年均": pd.to_numeric(r.get("ROE5年均"), errors="coerce"),
@@ -125,6 +126,11 @@ def evaluate(pos, close, yoys, qgm, h):
     thr_gm = pos.get("證偽_毛利率", {}).get("跌破")
     if qgm is not None and thr_gm is not None and qgm < thr_gm:
         falsify.append(f"毛利{qgm}%跌破{thr_gm}%")
+    # 存貨年增證偽:存貨爆衝 = 需求軟訊號(八方案例觸發 45)
+    thr_inv = pos.get("證偽_存貨年增")
+    inv_yoy = h.get("存貨年增%") if h else None
+    if inv_yoy is not None and thr_inv is not None and pd.notna(inv_yoy) and inv_yoy >= thr_inv:
+        falsify.append(f"存貨年增{inv_yoy:.0f}%≥{thr_inv}%")
     sig["①證偽"] = "🔴 " + "、".join(falsify) if falsify else ""
 
     # ── ② 估值過熱(🔴 嚴格:位階高 + 成長下滑/PEG高)──

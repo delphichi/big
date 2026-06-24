@@ -40,6 +40,7 @@ import os, time, json
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
+from forward_pe import forward_metrics      # 未來估值(Forward PE/PEG)單一真理來源
 
 # ---------- 設定 ----------
 TOKEN      = os.environ.get("FINMIND_TOKEN", "")
@@ -422,6 +423,16 @@ def summary_row(sid, name, raw):
         row["殖利率%"] = p.get("dividend_yield")
     # 成長:最新月營收年增
     row["最新月營收年增%"] = revenue_yoy(raw)
+    # 未來估值(Forward PE/PEG)— 與體檢/拐點同口徑(forward_pe 共用模組);循環股自動豁免
+    ev = [eps_year[y] for y in sorted(eps_year)] if eps_year else []
+    if len(ev) >= 2:
+        e5 = ((ev[-1]/ev[0])**(1/(len(ev)-1))-1)*100 if ev[0] > 0 and ev[-1] > 0 else np.nan
+        e3 = ((ev[-1]/ev[-3])**0.5-1)*100 if len(ev) >= 3 and ev[-3] > 0 and ev[-1] > 0 else np.nan
+        cyc = (min(ev) <= 0) or any(ev[i] < ev[i-1]*0.8 for i in range(1, len(ev)))
+        fwd = forward_metrics(row.get("收盤"), row.get("近四季EPS"), row.get("PER(自算)"),
+                              e3, e5, row.get("最新月營收年增%"), cyc)
+        for k, vv in fwd.items():
+            row[k] = vv
     hist = hist_levels(sid, name, perf, raw.get("PER"), ps) if not perf.empty else {"代號": sid, "名稱": name}
     return row, perf, rev_year, eps_year, hist
 
@@ -459,11 +470,24 @@ def build_output(namemap):
         if not c:
             continue
         done += 1
-        rows.append(c.get("row", {"代號": sid}))
+        row = c.get("row", {"代號": sid})
+        # 未來估值:若快取 row 尚無(舊快取),即時用 eps_year 補算(免重抓財報)
+        ey = c.get("eps_year")
+        if "未來估值" not in row and ey:
+            ev = [ey[y] for y in sorted(ey)]
+            if len(ev) >= 2:
+                e5 = ((ev[-1]/ev[0])**(1/(len(ev)-1))-1)*100 if ev[0] > 0 and ev[-1] > 0 else np.nan
+                e3 = ((ev[-1]/ev[-3])**0.5-1)*100 if len(ev) >= 3 and ev[-3] > 0 and ev[-1] > 0 else np.nan
+                cyc = (min(ev) <= 0) or any(ev[i] < ev[i-1]*0.8 for i in range(1, len(ev)))
+                for k, vv in forward_metrics(row.get("收盤"), row.get("近四季EPS"),
+                                             row.get("PER(自算)"), e3, e5,
+                                             row.get("最新月營收年增%"), cyc).items():
+                    row[k] = vv
+        rows.append(row)
         hists.append(c.get("hist", {"代號": sid}))
         name = namemap.get(sid, sid)
         if c.get("rev_year"): rev_years[f"{sid} {name}"] = c["rev_year"]
-        if c.get("eps_year"): eps_years[f"{sid} {name}"] = c["eps_year"]
+        if ey: eps_years[f"{sid} {name}"] = ey
         if c.get("q_gm"):     q_gms[f"{sid} {name}"] = c["q_gm"]
     if not rows:
         print("尚無任何已完成資料,略過輸出"); return 0
@@ -473,10 +497,12 @@ def build_output(namemap):
             "5年營收CAGR%", "5年平均淨利率%", "5年平均ROE%",
             "毛利率%", "營益率%", "淨利率%", "近四季EPS", "近四季ROE%",
             "負債比%", "流動比%", "獲利含金量", "近四季自由現金流(億)",
-            "收盤", "市值(億)", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%"]
+            "收盤", "市值(億)", "PER(自算)", "PE位階%", "PBR", "殖利率%", "最新月營收年增%",
+            "成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值"]
     df = df[[c for c in cols if c in df.columns]]
+    TEXT_COLS = ("代號", "名稱", "金融", "最新季", "未來估值")
     for col in df.columns:
-        if col not in ("代號", "名稱", "金融", "最新季"):
+        if col not in TEXT_COLS:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     sort_key = "5年平均ROE%" if "5年平均ROE%" in df.columns else "近四季ROE%"
     if sort_key in df.columns:

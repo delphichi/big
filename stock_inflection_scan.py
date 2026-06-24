@@ -19,6 +19,7 @@ Howard Marks 二階思考:超額報酬來自在『市場還沒認可它是好公
 import os
 import numpy as np
 import pandas as pd
+from forward_pe import forward_metrics      # 未來估值(Forward PE/PEG)單一真理來源
 
 SRC = "data/台股財報估值.xlsx"
 OUT = "data/台股_拐點掃描.xlsx"
@@ -93,7 +94,7 @@ def main():
 
     m = val.merge(his[["代號", "PER位階%", "PBR位階%", "毛利率位階%"]], on="代號", how="left")
     for c in ["近四季ROE%", "5年平均ROE%", "獲利含金量", "PE位階%", "PBR位階%",
-              "最新月營收年增%", "近四季EPS", "5年營收CAGR%"]:
+              "最新月營收年增%", "近四季EPS", "5年營收CAGR%", "收盤", "PER(自算)"]:
         m[c] = pd.to_numeric(m[c], errors="coerce")
     nf = m[m["金融"].isna()].copy()
 
@@ -132,6 +133,9 @@ def main():
         candidate = cheap and cash_ok and eps_not_dying and sig >= 2
         tier = ("🔥強拐點" if sig >= 3 else "🌱初拐點") if candidate else ""
 
+        # 未來估值(Forward PE/PEG)— 與體檢同口徑;循環股自動豁免
+        fwd = forward_metrics(r.get("收盤"), r.get("近四季EPS"), r.get("PER(自算)"),
+                              e3p, e5p, mo, cyclical)
         rows.append({
             "代號": c, "名稱": r["名稱"], "分級": tier, "改善訊號數": sig,
             "A毛利拐頭": A_txt, "B月營收動能": "✓" if B else "✗",
@@ -142,6 +146,8 @@ def main():
             "含金量": g, "循環": "⚠️" if cyclical else "",
             "看哪個位階": "PBR" if cyclical else "PE",
             "估值位階": vpos, "PER": round(r["PER(自算)"], 1) if pd.notna(r["PER(自算)"]) else None,
+            "ForwardPE": fwd.get("ForwardPE"), "PEG": fwd.get("PEG"),
+            "未來估值": fwd.get("未來估值", ""), "成長率g%": fwd.get("成長率g%"),
             "殖利率%": r.get("殖利率%"),
         })
 

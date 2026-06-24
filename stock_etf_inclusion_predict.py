@@ -80,7 +80,8 @@ def main():
     if os.path.exists(HEA):
         hea = pd.read_excel(HEA, "體檢總表")
         hea["代號"] = hea["代號"].astype(str)
-        hea_cols = ["代號", "評等", "品質總分", "估值", "循環股", "含金量"]
+        hea_cols = ["代號", "評等", "品質總分", "估值", "循環股", "含金量",
+                    "⑪動態惡化扣分", "負債比%", "流動比%"]
         hea = hea[[c for c in hea_cols if c in hea.columns]]
     inf = pd.DataFrame()
     if os.path.exists(INF):
@@ -150,6 +151,11 @@ def main():
         elif "合理" in v: s += 18
         elif "偏貴" in v: s += 5
         s += forward_bonus(r)                          # 未來估值(forward PE/PEG)加分
+        # ⑪ 動態惡化扣分:乘 1.5x 加重(體檢已扣一次,在 ETF 卡位場景更該避免)
+        # 體檢扣 -5/-10/-15 → 這裡扣 -7/-15/-22
+        pen = pd.to_numeric(r.get("⑪動態惡化扣分"), errors="coerce")
+        if pd.notna(pen) and pen < 0:
+            s += float(pen) * 1.5
         ca = pd.to_numeric(r.get("含金量"), errors="coerce")
         if pd.notna(ca):
             if ca >= 1.2: s += 15
@@ -207,6 +213,10 @@ def main():
             elif "合理" in v: s += 18
             elif "偏貴" in v: s += 5
             s += forward_bonus(r)                      # 未來估值(forward PE/PEG)加分
+            # ⑪ 動態惡化扣分(1.5x 加重,同 0050)
+            pen = pd.to_numeric(r.get("⑪動態惡化扣分"), errors="coerce")
+            if pd.notna(pen) and pen < 0:
+                s += float(pen) * 1.5
             ca = pd.to_numeric(r.get("含金量"), errors="coerce")
             if pd.notna(ca):
                 if ca >= 1.2: s += 15
@@ -260,6 +270,7 @@ def main():
     # ---- 輸出 ----
     out_cols = ["TWSE排名", "代號", "名稱", "大盤比重%", "納入潛力分", "評等", "品質總分",
                 "估值", "未來估值", "PEG", "ForwardPE", "成長率g%",
+                "⑪動態惡化扣分", "負債比%", "流動比%",
                 "改善訊號數", "分級", "含金量", "市值(億)", "PER(自算)", "PE位階%",
                 "PBR", "殖利率%", "最新月營收年增%", "循環股"]
     out_cols = [c for c in out_cols if c in cand_a.columns]
@@ -279,6 +290,7 @@ def main():
         if not cand_otc_a.empty:
             otc_a_cols = ["OTC排名", "代號", "名稱", "OTC市值億", "納入潛力分", "評等",
                           "品質總分", "估值", "未來估值", "PEG", "ForwardPE", "成長率g%",
+                          "⑪動態惡化扣分", "負債比%", "流動比%",
                           "改善訊號數", "分級", "含金量",
                           "PER(自算)", "PE位階%", "PBR", "殖利率%",
                           "最新月營收年增%", "循環股"]

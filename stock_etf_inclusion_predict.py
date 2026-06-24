@@ -74,12 +74,13 @@ def main():
                 val[c] = pd.to_numeric(val[c], errors="coerce")
 
     # ---- 合併體檢/拐點 ----
+    # 注意:財報估值表(val)現已含 forward 欄(成長率g%/ForwardPE/PEG/未來估值),
+    # 故體檢只取『評分專屬』欄,避免與 val 的 forward 同名 merge 衝突(_x/_y)。
     hea = pd.DataFrame()
     if os.path.exists(HEA):
         hea = pd.read_excel(HEA, "體檢總表")
         hea["代號"] = hea["代號"].astype(str)
-        hea_cols = ["代號", "評等", "品質總分", "估值", "循環股", "含金量",
-                    "成長率g%", "ForwardPE", "PEG", "未來估值"]
+        hea_cols = ["代號", "評等", "品質總分", "估值", "循環股", "含金量"]
         hea = hea[[c for c in hea_cols if c in hea.columns]]
     inf = pd.DataFrame()
     if os.path.exists(INF):

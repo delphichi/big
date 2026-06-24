@@ -141,11 +141,12 @@ def main():
     his = pd.read_excel(SRC, "相對歷史水位"); his["代號"] = his["代號"].astype(str)
     eps = pd.read_excel(SRC, "逐年EPS", index_col=0)
 
-    m = val.merge(his[["代號", "毛利率位階%", "營益率位階%", "淨利率位階%", "ROE位階%", "PER位階%", "PBR位階%"]],
+    m = val.merge(his[["代號", "毛利率位階%", "營益率位階%", "淨利率位階%", "ROE位階%",
+                       "PER位階%", "PBR位階%", "ROE5年均"]],
                   on="代號", how="left")
     for c in ["近四季ROE%", "獲利含金量", "5年營收CAGR%", "最新月營收年增%", "近四季EPS",
               "PER(自算)", "PE位階%", "毛利率位階%", "營益率位階%", "淨利率位階%", "PBR位階%",
-              "殖利率%", "收盤", "負債比%", "營益率%"]:
+              "殖利率%", "收盤", "負債比%", "流動比%", "營益率%", "ROE5年均"]:
         if c in m.columns:
             m[c] = pd.to_numeric(m[c], errors="coerce")
 
@@ -170,7 +171,9 @@ def main():
         out = {"代號": c, "名稱": r["名稱"], "評等": grade, "品質總分": score,
                "EPS5y%": round(e5, 1) if pd.notna(e5) else None,
                "EPS近3y%": round(e3, 1) if pd.notna(e3) else None,
-               "ROE": r["近四季ROE%"], "ROIC估算": roic_proxy, "含金量": r["獲利含金量"],
+               "ROE": r["近四季ROE%"], "ROE5年均": r.get("ROE5年均"),
+               "ROIC估算": roic_proxy, "含金量": r["獲利含金量"],
+               "負債比%": r.get("負債比%"), "流動比%": r.get("流動比%"),
                "毛利位階": r["毛利率位階%"], "淨利位階": r["淨利率位階%"],
                "營收5yCAGR": r["5年營收CAGR%"], "月營收YoY": r["最新月營收年增%"],
                "PER": round(r["PER(自算)"], 1) if pd.notna(r["PER(自算)"]) else None,
@@ -193,7 +196,8 @@ def main():
 
     part_cols = ["⑥EPS成長", "⑧含金量", "⑨ROE", "②毛利位階", "③營益位階",
                  "④淨利位階", "⑤營收成長", "①營收動能", "⑦EPS跟上營收"]
-    base = ["代號", "名稱", "評等", "品質總分", "EPS5y%", "EPS近3y%", "ROE", "ROIC估算", "含金量",
+    base = ["代號", "名稱", "評等", "品質總分", "EPS5y%", "EPS近3y%",
+            "ROE", "ROE5年均", "ROIC估算", "負債比%", "流動比%", "含金量",
             "毛利位階", "淨利位階", "營收5yCAGR", "月營收YoY", "PER", "PE位階", "PBR位階",
             "估值", "成長率g%", "預估明年EPS", "ForwardPE", "ForwardPE保守", "PEG", "未來估值",
             "殖利率", "循環股", "主要漏洞"]

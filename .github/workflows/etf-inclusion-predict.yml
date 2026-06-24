@@ -35,6 +35,9 @@ jobs:
       - name: 跑 0050 納入預測
         run: python stock_etf_inclusion_predict.py
 
+      - name: 產出 未來PE報表
+        run: python forward_pe_report.py || echo "未來PE報表失敗,繼續"
+
       - name: Commit
         if: always()
         run: |
@@ -44,7 +47,8 @@ jobs:
           # 只提交輸出 xlsx,不碰 _tw_val_cache(快取由 tw-fundamentals 維護;
           # 否則 backfill 後的 float 重序列化會造成上百檔雜訊 diff + 合併衝突)
           git add "data/台股財報估值.xlsx" "data/台股_體檢總表.xlsx" \
-                  "data/台股_拐點掃描.xlsx" "data/台股_0050納入預測.xlsx" 2>/dev/null || true
+                  "data/台股_拐點掃描.xlsx" "data/台股_0050納入預測.xlsx" \
+                  "data/未來PE報表.xlsx" 2>/dev/null || true
           if git diff --staged --quiet; then echo "無變更"; exit 0; fi
           git commit -m "data: 0050 納入預測 $(date -u +%Y%m%d)"
           # 推到觸發此 run 的同一分支;衝突一律保留本次最新產物(-X ours)

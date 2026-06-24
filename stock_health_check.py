@@ -122,6 +122,26 @@ def grade_quality(r):
         p = 0
     parts["⑦EPS跟上營收"] = p; s += p
 
+    # ⑪ 動態惡化扣分(最高扣 -15)— 抓「當下漂亮但正在變差」的陷阱
+    #   核心競爭力流失(ROE 從 5年均>=15 滑到 <67%)→ 扣 10
+    #   短期償債警報(負債>70 + 流動<100)→ 扣 10
+    #   高槓桿(負債>80,即使流動還OK)→ 扣 5
+    penalty = 0
+    roe_cur = r.get("近四季ROE%"); roe_avg = r.get("ROE5年均")
+    if pd.notna(roe_cur) and pd.notna(roe_avg) and roe_avg >= 15 and roe_cur < roe_avg * 0.67:
+        penalty += 10
+        leak.append(f"⚠️ROE滑落({roe_cur:.0f}<5年均{roe_avg:.0f}×67%)")
+    dr = r.get("負債比%"); cr = r.get("流動比%")
+    if pd.notna(dr) and dr > 70 and pd.notna(cr) and cr < 100:
+        penalty += 10
+        leak.append(f"⚠️短期償債警報(負債{dr:.0f}+流動{cr:.0f})")
+    elif pd.notna(dr) and dr > 80:
+        penalty += 5
+        leak.append(f"⚠️高槓桿(負債{dr:.0f}%)")
+    penalty = min(penalty, 15)              # 累計上限 15(避免雙條都中扣到評等崩盤)
+    parts["⑪動態惡化扣分"] = -penalty
+    s -= penalty
+
     return round(s, 1), parts, leak
 
 
@@ -195,7 +215,8 @@ def main():
                     df[df["評等"] == "金融🏦"]], ignore_index=True)
 
     part_cols = ["⑥EPS成長", "⑧含金量", "⑨ROE", "②毛利位階", "③營益位階",
-                 "④淨利位階", "⑤營收成長", "①營收動能", "⑦EPS跟上營收"]
+                 "④淨利位階", "⑤營收成長", "①營收動能", "⑦EPS跟上營收",
+                 "⑪動態惡化扣分"]
     base = ["代號", "名稱", "評等", "品質總分", "EPS5y%", "EPS近3y%",
             "ROE", "ROE5年均", "ROIC估算", "負債比%", "流動比%", "含金量",
             "毛利位階", "淨利位階", "營收5yCAGR", "月營收YoY", "PER", "PE位階", "PBR位階",

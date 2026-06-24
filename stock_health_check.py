@@ -224,6 +224,11 @@ def main():
             elif close <= out["偏便宜價"]:    out["鬧鐘"] = "🟢偏便宜"
             elif close <= out["合理價"]:      out["鬧鐘"] = "🟡合理"
             else:                              out["鬧鐘"] = "🔴貴於合理價"
+        # ⑪ 動態惡化聯動:扣 ≤-10 時鬧鐘自動降級(避免「便宜陷阱看起來像深度買點」)
+        # 統一超案例:現價 225 < 深度買點 245.6 標💎,但 ⑪ -10 + 短期償債警報 → 應為陷阱
+        pen = parts.get("⑪動態惡化扣分", 0)
+        if pen is not None and pen <= -10 and out["鬧鐘"] in ("💎深度買點", "🟢偏便宜"):
+            out["鬧鐘"] = "⚠️便宜陷阱(動態惡化)"
         out.update(parts)
         rows.append(out)
 

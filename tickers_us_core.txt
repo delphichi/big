@@ -1,67 +1,65 @@
-# 美股核心觀察名單(50檔精選) — 從前面四批螢幕清單分析的「好公司+好價格」交集
-# 篩選邏輯:高 ROIC + PEG<1 或 PE合理 + 排除明顯陷阱(負成長/超貴/題材股)
-# 適用免費 FMP 250 calls/day(50×5=250 剛好)
+# 美股核心觀察名單 — 持倉優先 + 精選對照
+# 規則:持倉檔放最前(若 FMP 撞額度也先抓到);其餘依產業精選
+# 適用免費 FMP 250 calls/day(每檔約5 calls → ≤50 檔安全)
 
-# === 科技/軟體(高 ROIC 且估值不極端) ===
+# === 持倉(16 檔)— 必抓 ===
+AMZN
+AVGO
+BRK-B
+CBRS
+CEG
+GEV
+GLW
 GOOG
-GOOGL
+HIG
 MSFT
+NVDA
+PLTR
+ULTA
+TSLA
+TLN
+VST
+
+# === 科技/軟體(原核心,排除已在持倉) ===
+GOOGL
 META
 NFLX
-NVDA
 TSM
 ADBE
 INTU
 ADSK
-DXCM
 FICO
-PYPL
-ZTS
 
-# === 醫藥/醫療通路(最大價值窪地) ===
+# === 醫藥/醫療通路(最大價值窪地)— 精選保留 ===
 MCK
 COR
-CAH
 HCA
-CI
 GILD
 BMY
-RMD
-INCY
 LLY
 
-# === 保險/資產管理(高 ROIC + 低 PEG 的價值窪地) ===
+# === 保險/資產管理(高 ROIC + 低 PEG 的價值窪地)— 精選保留 ===
 PGR
 TRV
 AON
-HIG
 AFL
-ALL
-AMP
-CINF
 TROW
 CB
 PRU
 
-# === 消費/防禦 ===
+# === 消費/防禦 — 精選保留 ===
 COST
 WMT
 KO
-PM
 PG
 MCD
-COST
 
-# === 銀行(便宜的P/B<2) ===
+# === 銀行 — 精選保留 ===
 JPM
 WFC
-USB
-PNC
 
-# === 工業/其他高品質 ===
+# === 工業 — 精選保留 ===
 BKNG
 ORLY
 NOC
-GD
-EME
 LIN

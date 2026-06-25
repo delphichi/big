@@ -116,51 +116,118 @@ def diff(cur, prev):
     return new, drop, chg
 
 
-def main():
-    # ETF_DATE=YYYYMMDD 指定抓任意日期(回補/驗證用);空=今天
-    _d = os.environ.get("ETF_DATE", "").strip()
-    today = pd.to_datetime(_d, format="%Y%m%d").date() if _d else date.today()
-    print(f"目標日期:{today:%Y/%m/%d}\n")
-    consensus_buy = {}   # 代號 → [基金名] 同時新增/加碼
-    print(f"=== 主動式 ETF 持股監看 {today:%Y/%m/%d} ===\n")
+def pull_day(d):
+    """抓+存當日所有基金快照,回傳 {code: df}。"""
+    out = {}
     for fund in FUNDS:
-        content = fetch(fund, today)
+        content = fetch(fund, d)
         if content is None:
-            print(f"[{fund['code']} {fund['name']}] 今日無資料(假日/未公告/抓取失敗)")
             continue
         cur = parse(content)
         if cur is None or cur.empty:
-            print(f"[{fund['code']} {fund['name']}] 解析失敗")
             continue
-        save_snapshot(fund["code"], today, cur)
+        save_snapshot(fund["code"], d, cur)
+        out[fund["code"]] = cur
+    return out
+
+
+def cross_fund(day_dfs):
+    """跨基金分析:共同持有(共識核心)+ 買賣共識/分歧。"""
+    codes = [c for c in day_dfs if not day_dfs[c].empty]
+    if len(codes) < 2:
+        return
+    nm = {f["code"]: f["name"] for f in FUNDS}
+    sets = [set(day_dfs[c].index) for c in codes]
+    common = set.intersection(*sets)
+    ref = day_dfs[codes[0]]
+    print("🔥 跨基金『共同持有』(法人共識核心):")
+    for s in sorted(common, key=lambda s: -(ref.loc[s, "權重"] if s in ref.index else 0))[:12]:
+        ws = " | ".join(f"{nm[c][:2]}{day_dfs[c].loc[s, '權重']:.1f}%" for c in codes if s in day_dfs[c].index)
+        nmstr = ref.loc[s, "名稱"] if s in ref.index else s
+        print(f"   {s} {str(nmstr)[:5]:5s}  {ws}")
+    print(f"   共同 {len(common)}檔 / 共 {len(codes)} 檔基金\n")
+
+
+def diff_consensus(today):
+    """以已存快照,算今日 vs 前一快照的跨基金買賣共識/分歧。"""
+    buy, sell = {}, {}
+    nm = {f["code"]: f["name"] for f in FUNDS}
+    for fund in FUNDS:
+        cur_f = snapshot_path(fund["code"], today)
+        if not os.path.exists(cur_f):
+            continue
+        cur = pd.read_csv(cur_f, dtype={"代號": str}).set_index("代號")
         p = prev_snapshot(fund["code"], today)
         if not p:
-            print(f"[{fund['code']} {fund['name']}] {len(cur)}檔(首日快照,無前日可比)")
             continue
         prev, pname = p
         new, drop, chg = diff(cur, prev)
         print(f"[{fund['code']} {fund['name']}] vs {pname}:")
-        for s, nm, w in new:
-            print(f"   🟢新增 {s} {nm} 權重{w}%"); consensus_buy.setdefault(s, []).append(fund["name"])
-        for s, nm, w in drop:
-            print(f"   🔴剔除 {s} {nm}")
-        for s, nm, pct, w in chg[:6]:
-            ar = "⬆️加" if pct > 0 else "⬇️減"
-            print(f"   {ar} {s} {nm} {pct:+.1f}% 權重{w}%")
-            if pct > 0:
-                consensus_buy.setdefault(s, []).append(fund["name"])
+        for s, n, w in new:
+            print(f"   🟢新增 {s} {n}"); buy.setdefault(s, []).append(fund["name"])
+        for s, n, w in drop:
+            print(f"   🔴剔除 {s} {n}"); sell.setdefault(s, []).append(fund["name"])
+        for s, n, pct, w in chg[:5]:
+            print(f"   {'⬆️加' if pct > 0 else '⬇️減'} {s} {n} {pct:+.0f}%")
+            (buy if pct > 0 else sell).setdefault(s, []).append(fund["name"])
         if not (new or drop or chg):
             print("   (無變化)")
         print()
+    # 共識(≥2檔同方向)+ 分歧(一買一賣)
+    mb = {s: set(f) for s, f in buy.items() if len(set(f)) >= 2}
+    ms = {s: set(f) for s, f in sell.items() if len(set(f)) >= 2}
+    div = {s: (set(buy.get(s, [])), set(sell.get(s, []))) for s in set(buy) & set(sell)}
+    if mb:
+        print("🔥🔥 共識加碼(多檔同買):", "、".join(f"{s}({'/'.join(v)})" for s, v in mb.items()))
+    if ms:
+        print("🔥🔥 共識減碼(多檔同砍):", "、".join(f"{s}({'/'.join(v)})" for s, v in ms.items()))
+    if div:
+        print("⚖️ 分歧(有人買有人砍):", "、".join(f"{s}(買{','.join(b)}|砍{','.join(se)})" for s, (b, se) in div.items()))
+    if not (mb or ms or div):
+        print("(無跨基金共識/分歧訊號)")
 
-    # 跨基金共識:被多檔同時新增/加碼
-    multi = {s: fs for s, fs in consensus_buy.items() if len(set(fs)) >= 2}
-    if multi:
-        print("🔥🔥 法人共識(多檔主動ETF同時加碼/新增):")
-        for s, fs in sorted(multi.items(), key=lambda x: -len(set(x[1]))):
-            print(f"   {s} ← {'、'.join(sorted(set(fs)))}")
-    else:
-        print("(今日無跨基金共識訊號)")
+
+def week_report():
+    """讀所有已存快照,做近一週每檔淨變化 + 期初期末共識。"""
+    nm = {f["code"]: f["name"] for f in FUNDS}
+    print("\n========== 近期持股趨勢(全部已存快照)==========")
+    for fund in FUNDS:
+        files = sorted(glob.glob(os.path.join(OUTDIR, f"{fund['code']}_*.csv")))
+        if len(files) < 2:
+            continue
+        a = pd.read_csv(files[0], dtype={"代號": str}).set_index("代號")
+        b = pd.read_csv(files[-1], dtype={"代號": str}).set_index("代號")
+        d0, d1 = files[0][-12:-4], files[-1][-12:-4]
+        print(f"\n━━ {fund['code']} {fund['name']}  {d0}→{d1} ━━")
+        new, drop, chg = diff(b, a)
+        if new: print("  🟢期間新進:", "、".join(f"{s}{n}" for s, n, w in new))
+        if drop: print("  🔴期間剔除:", "、".join(f"{s}{n}" for s, n, w in drop))
+        for s, n, pct, w in [x for x in chg if abs(x[2]) >= 10][:8]:
+            print(f"   {'⬆️加' if pct > 0 else '⬇️減'} {s}{n} {pct:+.0f}% (現權重{w}%)")
+
+
+def main():
+    backfill = int(os.environ.get("ETF_BACKFILL_DAYS", "0") or "0")
+    if backfill > 0:
+        # 回補:從 today 往回抓 backfill 天(假日自動跳過),建立一週快照
+        end = date.today()
+        print(f"=== 回補近 {backfill} 天主動式ETF快照 ===\n")
+        for i in range(backfill, -1, -1):
+            d = end - timedelta(days=i)
+            got = pull_day(d)
+            print(f"  {d:%Y/%m/%d}: {len(got)} 檔基金有資料")
+        week_report()
+        return
+
+    _d = os.environ.get("ETF_DATE", "").strip()
+    today = pd.to_datetime(_d, format="%Y%m%d").date() if _d else date.today()
+    print(f"=== 主動式 ETF 持股監看 {today:%Y/%m/%d} ===\n")
+    day_dfs = pull_day(today)
+    if not day_dfs:
+        print("今日無資料(假日/未公告)"); return
+    diff_consensus(today)
+    print()
+    cross_fund(day_dfs)
 
 
 if __name__ == "__main__":

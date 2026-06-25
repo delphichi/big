@@ -41,8 +41,9 @@ OUT   = "data/美股體檢總表.xlsx"
 KEY   = os.environ.get("FMP_API_KEY", "")
 
 RATE_SLEEP = 0.5                   # 每檔間隔:5 calls/檔 × ~1檔/秒 ≈ 250-300/分,安全壓在 300 下(429 另有退避重試)
-# 付費 FMP 無 250/天 限制 → 預設一輪抓完(600 涵蓋全候選池);免費版請設 US_MAX_FETCH=45
+# 付費 FMP 無 250/天 限制 → 預設一輪抓多檔;免費版請設 US_MAX_FETCH=45
 MAX_FETCH  = int(os.environ.get("US_MAX_FETCH", "600"))
+MAX_RUNTIME_MIN = int(os.environ.get("US_MAX_RUNTIME_MIN", "45"))   # 自停寫檔, 早於 CI 硬 timeout
 FRESH_DAYS = int(os.environ.get("US_FRESH_DAYS", "30"))  # 體檢表內 N 天內的不重抓(增量省額度)
 
 
@@ -303,6 +304,32 @@ def grade(r):
     return round(s, 1), "、".join(leak[:3])
 
 
+def write_table(rows, q_gm_all):
+    """把目前累積的 rows 寫出 Excel(中途/結尾都呼叫;確保 timeout 也不丟進度)。"""
+    if not rows:
+        return
+    df = pd.DataFrame(rows).sort_values("品質總分", ascending=False)
+    cols = ["代號", "名稱", "產業", "評等", "品質總分", "EPS5y%", "EPS3y%",
+            "ROE%", "ROE5年均%", "ROIC%", "負債比%", "流動比", "含金量",
+            "毛利率%", "淨利率%", "營收CAGR%", "PER", "PE位階", "PBR", "PBR位階", "PEG",
+            "成長率g%", "預估明年EPS", "ForwardPE", "未來估值",
+            "估值", "殖利率%", "市值(億美)", "循環股", "主要漏洞"]
+    df = df[[c for c in cols if c in df.columns]]
+    os.makedirs("data", exist_ok=True)
+    tmp = OUT + ".tmp.xlsx"
+    with pd.ExcelWriter(tmp, engine="openpyxl") as xw:
+        df.to_excel(xw, sheet_name="體檢總表", index=False)
+        a = df[df["評等"] == "A"]
+        a.to_excel(xw, sheet_name="A級好公司", index=False)
+        a[a["估值"].isin(["🟢便宜", "🟡合理"])].to_excel(xw, sheet_name="A級+好價格", index=False)
+        df[df["循環股"] != ""].to_excel(xw, sheet_name="循環股", index=False)
+        if q_gm_all:                                  # 逐季毛利率(供拐點掃描算毛利拐頭)
+            qg = pd.DataFrame({k: pd.Series(v) for k, v in q_gm_all.items()}).T
+            qg = qg.reindex(columns=sorted(qg.columns))
+            qg.to_excel(xw, sheet_name="逐季毛利率")
+    os.replace(tmp, OUT)                               # 原子置換,中途被 kill 也不毀檔
+
+
 def main():
     if not KEY:
         print("⚠️ 未設 FMP_API_KEY 環境變數,腳本中止。")
@@ -319,6 +346,7 @@ def main():
         print("✓ 名單全部已抓過(增量完成);要強制更新請刪 data/美股體檢總表.xlsx 或調 US_MAX_FETCH")
     rows = list(existing.values())                 # 先保留既有,新抓的 append
     debug_done = False
+    t0 = time.time()
     for i, sym in enumerate(todo, 1):
         try:
             if not debug_done:                 # 第一檔印 ttm/ratios 鍵名,供校準
@@ -358,30 +386,17 @@ def main():
             print(f"[{i}/{len(todo)}] {sym:6s} 分 {sc} {r['評等']} {r['估值']}")
         except Exception as e:
             print(f"  ! {sym} 失敗:{e}")
+        # 每 200 檔中途存檔 + 自停:確保 CI 硬 timeout 前已落地進度(原子置換)
+        if i % 200 == 0:
+            write_table(rows, q_gm_all)
+            print(f"  …中途存檔 {len(rows)} 檔")
+        if (time.time() - t0) / 60 > MAX_RUNTIME_MIN:
+            print(f"達 {MAX_RUNTIME_MIN} 分自停(本輪處理 {i} 檔),存檔退出,下輪續抓")
+            break
         time.sleep(RATE_SLEEP)
 
-    if not rows:
-        print("⚠️ 0 檔成功,不產出 Excel(可能是 API key/端點問題,先查 log)")
-        return
-    df = pd.DataFrame(rows).sort_values("品質總分", ascending=False)
-    cols = ["代號", "名稱", "產業", "評等", "品質總分", "EPS5y%", "EPS3y%",
-            "ROE%", "ROE5年均%", "ROIC%", "負債比%", "流動比", "含金量",
-            "毛利率%", "淨利率%", "營收CAGR%", "PER", "PE位階", "PBR", "PBR位階", "PEG",
-            "成長率g%", "預估明年EPS", "ForwardPE", "未來估值",
-            "估值", "殖利率%", "市值(億美)", "循環股", "主要漏洞"]
-    df = df[[c for c in cols if c in df.columns]]
-    os.makedirs("data", exist_ok=True)
-    with pd.ExcelWriter(OUT, engine="openpyxl") as xw:
-        df.to_excel(xw, sheet_name="體檢總表", index=False)
-        a = df[df["評等"] == "A"]
-        a.to_excel(xw, sheet_name="A級好公司", index=False)
-        a[a["估值"].isin(["🟢便宜", "🟡合理"])].to_excel(xw, sheet_name="A級+好價格", index=False)
-        df[df["循環股"] != ""].to_excel(xw, sheet_name="循環股", index=False)
-        if q_gm_all:                                  # 逐季毛利率(供拐點掃描算毛利拐頭)
-            qg = pd.DataFrame({k: pd.Series(v) for k, v in q_gm_all.items()}).T
-            qg = qg.reindex(columns=sorted(qg.columns))
-            qg.to_excel(xw, sheet_name="逐季毛利率")
-    print(f"完成 → {OUT}({len(df)} 檔)")
+    write_table(rows, q_gm_all)
+    print(f"完成 → {OUT}({len(rows)} 檔)")
 
 
 if __name__ == "__main__":

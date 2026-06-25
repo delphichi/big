@@ -113,6 +113,25 @@ PICKS = [
     "4722","2422","3680","1764","3532","6937",
 ]
 
+# 掃描清單:預設 = PICKS(精選快速);main() 在 FULL_MARKET=1 時擴成「PICKS ∪ 全市場普通股」。
+# build_output 與主迴圈都讀這個,所以全市場模式只要改它即可。
+SCAN_LIST = list(PICKS)
+
+def load_full_universe(dl):
+    """全市場普通股代號(排除 ETF/權證/特別股/受益證券)。供 FULL_MARKET 模式用。"""
+    try:
+        info = dl.taiwan_stock_info()
+    except Exception as e:
+        print("取全市場清單失敗,退回 PICKS:", e)
+        return set()
+    skip = {"ETF", "Index", "大盤", "ETN", "受益證券", "存託憑證", "創新板"}
+    out = set()
+    for _, r in info.iterrows():
+        sid = str(r["stock_id"]); ind = str(r.get("industry_category", ""))
+        if len(sid) == 4 and sid.isdigit() and not sid.startswith("00") and ind not in skip:
+            out.add(sid)
+    return out
+
 # 金融股(銀行/金控/保險/券商):營收/利潤率口徑不適用,輸出會標 🏦(估值 PER/PBR/殖利率仍有效)。
 # 手動清單(保底);main() 會再 ∪ 自動偵測(industry_category 含金融/保險),雙保險
 FINANCIALS = {"2890","2884","2880","2887","2891","2812","2836","6005","2850","2889",
@@ -512,7 +531,7 @@ def load_cache(sid):
 def build_output(namemap):
     rows, hists, rev_years, eps_years, q_gms = [], [], {}, {}, {}
     done = 0
-    for sid in PICKS:
+    for sid in SCAN_LIST:
         c = load_cache(sid)
         if not c:
             continue
@@ -594,7 +613,7 @@ def build_output(namemap):
             qg = pd.DataFrame({lbl: pd.Series(v) for lbl, v in q_gms.items()}).T
             qg = qg.reindex(columns=sorted(qg.columns))
             qg.to_excel(xw, sheet_name="逐季毛利率")
-    print(f"  → 已更新 {OUTPUT}(目前 {done}/{len(PICKS)} 檔)")
+    print(f"  → 已更新 {OUTPUT}(目前 {done}/{len(SCAN_LIST)} 檔)")
     return done
 
 
@@ -603,10 +622,15 @@ def main():
     t0 = time.time()
     dl = make_loader()
     namemap = load_names(dl)                            # 代號→官方股名
-    global FINANCIALS
+    global FINANCIALS, SCAN_LIST
     FINANCIALS = FINANCIALS | load_financials(dl)       # 手動清單 ∪ 自動偵測(金融保險業)
-    todo = [s for s in PICKS if load_cache(s) is None]
-    print(f"總 {len(PICKS)} 檔,已完成 {len(PICKS)-len(todo)} 檔,待抓 {len(todo)} 檔")
+    # FULL_MARKET=1 → 深抓全市場(PICKS ∪ 全部普通股 ~2000 檔);否則維持 PICKS(每週自動跑用)
+    if os.environ.get("FULL_MARKET") == "1":
+        uni = load_full_universe(dl)
+        SCAN_LIST = sorted(set(PICKS) | uni)
+        print(f"🌐 全市場模式:PICKS {len(PICKS)} ∪ 全市場 {len(uni)} → 掃描 {len(SCAN_LIST)} 檔")
+    todo = [s for s in SCAN_LIST if load_cache(s) is None]
+    print(f"總 {len(SCAN_LIST)} 檔,已完成 {len(SCAN_LIST)-len(todo)} 檔,待抓 {len(todo)} 檔")
     build_output(namemap)                              # 先用既有快取出一版(確保隨時有進度檔)
 
     for i, sid in enumerate(todo, 1):
@@ -645,7 +669,7 @@ def main():
         time.sleep(RATE_SLEEP)
 
     n = build_output(namemap)                          # 收尾再出一版完整的
-    print(f"\n完成 → {OUTPUT}({n}/{len(PICKS)} 檔)")
+    print(f"\n完成 → {OUTPUT}({n}/{len(SCAN_LIST)} 檔)")
 
 
 if __name__ == "__main__":

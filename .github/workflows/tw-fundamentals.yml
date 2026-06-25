@@ -2,6 +2,11 @@ name: 台股 財報估值
 
 on:
   workflow_dispatch:          # Actions 頁面手動執行
+    inputs:
+      full_market:
+        description: "全市場模式:深抓 ~2000 檔(否則僅 PICKS 精選)。一次跑不完,靠快取續跑多輪"
+        type: boolean
+        default: false
   schedule:
     # 06:00 UTC = 台北 14:00;每週一(財報季度才變,週更足夠;靠快取續抓、跑完即快)
     - cron: "0 6 * * 1"
@@ -29,10 +34,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install FinMind pandas numpy openpyxl requests lxml
 
-      - name: Run TW fundamentals (179 picks, 自算 PER)
+      - name: Run TW fundamentals(PICKS 精選 / 全市場視 full_market)
         env:
           # repo → Settings → Secrets and variables → Actions 新增 FINMIND_TOKEN
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          # 手動勾 full_market 才掃全市場;cron 自動跑 inputs 為空 → 維持 PICKS
+          FULL_MARKET: ${{ github.event.inputs.full_market == 'true' && '1' || '' }}
         run: python fetch_fundamentals_tw.py
 
       - name: Upload Excel as artifact

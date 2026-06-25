@@ -75,16 +75,26 @@ def build_output(tickers):
         c = load_cache(t)
         if not c or c.get("error") or c.get("skip"):
             continue
-        roe = c.get("roe_pct"); roic = c.get("roic_pct"); cash = c.get("ocf_to_ni")
-        if roe is None and roic is None:
+        # 排除權證/特別股/單位(ticker 含「-」或過長),只留乾淨普通股
+        if "-" in t or len(t) > 5:
             continue
-        passed = ((roe is not None and roe >= ROE_MIN) or (roic is not None and roic >= ROIC_MIN))
-        cash_ok = (cash is None) or (cash >= CASH_MIN)
-        if passed and cash_ok:
-            rows.append({
-                "代號": t, "ROE": roe, "ROIC": roic, "含金量": cash,
-                "毛利": c.get("gross_margin"), "FCF(B)": c.get("fcf_ttm_b"),
-                "遺珠": "" if t in watch else "✔",
+        roe = c.get("roe_pct"); roic = c.get("roic_pct")
+        cash = c.get("ocf_to_ni"); gm = c.get("gross_margin"); fcf = c.get("fcf_ttm_b")
+        # 任一比率爆表(>合理上限)= 微型股分母失真,整檔排除(不只單邊閘)
+        if (roe is not None and roe > 80) or (roic is not None and roic > 60):
+            continue
+        roe_ok = roe is not None and roe >= ROE_MIN
+        roic_ok = roic is not None and roic >= ROIC_MIN
+        if not (roe_ok or roic_ok):
+            continue
+        if gm is None or gm <= 0:               # 虧本毛利不算好公司
+            continue
+        if cash is None or cash < CASH_MIN:     # 須有真現金(None 不再放行)
+            continue
+        rows.append({
+            "代號": t, "ROE": roe, "ROIC": roic, "含金量": cash,
+            "毛利": gm, "FCF(B)": c.get("fcf_ttm_b"),
+            "遺珠": "" if t in watch else "✔",
             })
     if not rows:
         print("  尚無符合條件者(可能還在抓)"); return 0

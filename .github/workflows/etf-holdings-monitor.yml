@@ -3,6 +3,11 @@ name: 主動式ETF持股監看
 # 每日抓跨投信主動式ETF成分,diff昨天看經理人買賣。CI開放網路(本機proxy擋)。
 on:
   workflow_dispatch:
+    inputs:
+      target_date:
+        description: "指定抓取日期 YYYYMMDD(回補/驗證用,空=今天)"
+        type: string
+        default: ""
   schedule:
     # 10:00 UTC = 台北 18:00(收盤後PCF已更新);週一~週五
     - cron: "0 10 * * 1-5"
@@ -23,6 +28,8 @@ jobs:
       - run: pip install pandas openpyxl requests
 
       - name: 跑主動式ETF持股監看
+        env:
+          ETF_DATE: ${{ github.event.inputs.target_date }}
         run: python etf_holdings_monitor.py
 
       - name: Commit 快照

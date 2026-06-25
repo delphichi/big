@@ -117,7 +117,10 @@ def diff(cur, prev):
 
 
 def main():
-    today = date.today()
+    # ETF_DATE=YYYYMMDD 指定抓任意日期(回補/驗證用);空=今天
+    _d = os.environ.get("ETF_DATE", "").strip()
+    today = pd.to_datetime(_d, format="%Y%m%d").date() if _d else date.today()
+    print(f"目標日期:{today:%Y/%m/%d}\n")
     consensus_buy = {}   # 代號 → [基金名] 同時新增/加碼
     print(f"=== 主動式 ETF 持股監看 {today:%Y/%m/%d} ===\n")
     for fund in FUNDS:

@@ -139,6 +139,10 @@ def fetch_one(sym):
         rv, g = x.get("revenue"), x.get("grossProfit")
         if rv and g:
             q_gm.append((x.get("date", "")[:10], round(g/rv*100, 2)))
+    # 近四季 EPS(TTM)= 最近 4 季 epsdiluted 加總(台股口徑:自算 PE,不信廠商年度EPS/比率)
+    q_eps = [(x.get("epsdiluted") or x.get("eps")) for x in inc_q]
+    q_eps = [e for e in q_eps if e is not None]
+    ttm_eps = sum(q_eps[-4:]) if len(q_eps) >= 4 else (eps[-1] if eps else None)
 
     ttm0 = ttm[0] if ttm else {}
     prof0 = prof[0] if prof else {}
@@ -161,7 +165,12 @@ def fetch_one(sym):
     _cur = pick(ttm0, "currentRatioTTM", "currentRatio")
     # TTM PER/PBR:stable 的 key-metrics-ttm 不含,改自算(profile.price ÷ EPS, 跟台股同款)
     price = prof0.get("price") or prof0.get("regularMarketPrice")
-    cur_pe = (price / eps[-1]) if (price and eps and eps[-1] and eps[-1] > 0) else None
+    # 自算 PER = 收盤價 ÷ 近四季 TTM EPS(台股同口徑;比年度EPS即時、避免一次性/時點錯位)
+    cur_pe = (price / ttm_eps) if (price and ttm_eps and ttm_eps > 0) else None
+    # ADR/EPS換算失真 sanity gate:正獲利公司 PER<6 幾乎必為 EPS 基準錯亂(ADR比例/幣別),
+    # 標 None 不可信(PDD/TSM/BABA/CMCSA 等都 <5,真實最低合理 PER 約 9-10,中間有空檔)
+    if cur_pe is not None and cur_pe < 6:
+        cur_pe = None
     # PBR 自算需淨值,先試 ttm 的 bookValuePerShare,沒有則跳過
     bvps = pick(ttm0, "bookValuePerShareTTM", "tangibleBookValuePerShareTTM")
     cur_pb = (price / bvps) if (price and bvps and bvps > 0) else None
@@ -182,7 +191,7 @@ def fetch_one(sym):
 
     rev_l = rev[-1] if rev else None
     ni_l  = ni[-1] if ni else None
-    eps_l = eps[-1] if eps else None
+    eps_l = ttm_eps                      # forward 用近四季 TTM EPS(非年度),與自算 PER 同口徑
 
     return {
         "代號": sym,

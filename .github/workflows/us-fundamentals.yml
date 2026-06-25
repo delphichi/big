@@ -41,12 +41,18 @@ jobs:
           US_MAX_FETCH: "45"
         run: python fetch_fundamentals_us.py
 
+      - name: 下游報表(拐點 + 未來PE,讀體檢表免費重算)
+        if: always()
+        run: |
+          python stock_inflection_scan_us.py || echo "拐點略過"
+          python forward_pe_us.py || echo "未來PE略過"
+
       - name: Commit report to repo
         if: always()
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/美股體檢總表.xlsx || true
+          git add data/美股體檢總表.xlsx "data/美股_拐點掃描.xlsx" "data/美股_未來PE報表.xlsx" || true
           if git diff --staged --quiet; then echo "無變更"; exit 0; fi
           git commit -m "data: 美股體檢總表 $(date -u +%Y%m%d)"
           for i in 1 2 3 4 5; do

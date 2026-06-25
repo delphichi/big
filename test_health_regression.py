@@ -15,11 +15,13 @@
 退出碼:全過=0,有 FAIL=1(可接 CI gate)
 """
 import sys
+import os
 import pandas as pd
 import yaml
 
 SRC = "data/台股_體檢總表.xlsx"
 CASES = "regression_cases.yaml"
+SNAP = "snapshot_cases.yaml"
 
 
 def load():
@@ -54,10 +56,26 @@ def check_one(row, exp):
     return (len(fails) == 0), fails
 
 
+def check_snapshot(row, frozen):
+    """快照漂移檢查:評等/鬧鐘/漏洞關鍵字 是否跟凍結值一致。回傳 (一致bool, 漂移list)。"""
+    drift = []
+    grade = str(row.get("評等", ""))
+    alarm = (str(row.get("鬧鐘")) if pd.notna(row.get("鬧鐘")) else None)
+    leak = str(row.get("主要漏洞", "") or "")
+    if "評等" in frozen and grade != frozen["評等"]:
+        drift.append(f"評等 {frozen['評等']}→{grade}")
+    if "鬧鐘" in frozen and alarm != frozen["鬧鐘"]:
+        drift.append(f"鬧鐘 {frozen['鬧鐘']}→{alarm}")
+    for kw in frozen.get("漏洞關鍵字", []):
+        if kw not in leak:
+            drift.append(f"漏洞少了『{kw}』")
+    return (len(drift) == 0), drift
+
+
 def main():
     df, cases = load()
     npass = nfail = 0
-    print(f"=== 體檢回歸測試:{len(cases)} 檔金樣本 ===\n")
+    print(f"=== ① 正確性金樣本:{len(cases)} 檔(人工驗證,守對錯)===\n")
     for c in cases:
         sid = c["sid"]
         hit = df[df["代號"] == sid]
@@ -74,10 +92,32 @@ def main():
             for f in fails:
                 print(f"        └ {f}")
             nfail += 1
-    print(f"\n=== 結果:{npass} 過 / {nfail} 失敗 ===")
+
+    # ② 快照守門(非人工驗證,只守「判讀沒漂移」;漂移=警告不算 FAIL)
+    ndrift = 0
+    if os.path.exists(SNAP):
+        with open(SNAP, encoding="utf-8") as f:
+            snaps = (yaml.safe_load(f) or {}).get("snapshots", [])
+        print(f"\n=== ② 快照守門:{len(snaps)} 檔(偵錯批,守判讀漂移)===\n")
+        for s in snaps:
+            hit = df[df["代號"] == s["sid"]]
+            if hit.empty:
+                continue
+            ok, drift = check_snapshot(hit.iloc[0], s.get("凍結", {}))
+            if not ok:
+                print(f"  🔄 {s['sid']} {s['name']:6s} 判讀漂移:")
+                for d in drift:
+                    print(f"        └ {d}")
+                ndrift += 1
+        if not ndrift:
+            print(f"  ✅ {len(snaps)} 檔判讀無漂移")
+
+    print(f"\n=== 結果:正確性 {npass} 過 / {nfail} 失敗;快照漂移 {ndrift} 檔 ===")
     if nfail:
-        print("⚠️ 有退化!檢查上面 ❌ 的項目,可能是改 code 改壞了判讀。")
-    sys.exit(1 if nfail else 0)
+        print("❌ 正確性退化!改 code 改壞了已驗證判讀,必修。")
+    if ndrift:
+        print("🔄 快照漂移(非必錯):複查是否為預期改善,確認後跑 make_snapshot.py 更新基準。")
+    sys.exit(1 if nfail else 0)   # 只有正確性 FAIL 才讓 CI 紅;漂移僅警告
 
 
 if __name__ == "__main__":

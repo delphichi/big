@@ -44,6 +44,12 @@ def main():
         if c in h.columns:
             h[c] = pd.to_numeric(h[c], errors="coerce")
 
+    # 防禦 gate:PER<6 多為 ADR/EPS基準失真(源頭已自算TTM PER+gate,此處兜底舊資料)
+    bad = h["PER"].notna() & (h["PER"] < 6)
+    if bad.any():
+        print(f"  ⚠️ {bad.sum()} 檔 PER<6 視為資料失真標 NaN:{list(h.loc[bad,'代號'])}")
+        h.loc[bad, ["PER", "PEG"]] = pd.NA
+
     # 主表:有 forward 的(自動排除循環/資料不足)
     fwd = h[h["未來估值"].notna()].copy()
     fwd["四象限"] = fwd.apply(lambda r: quadrant(r.get("PER"), r.get("PEG")), axis=1)

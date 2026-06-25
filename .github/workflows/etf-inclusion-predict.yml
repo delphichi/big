@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install FinMind pandas numpy openpyxl requests lxml
+      - run: pip install FinMind pandas numpy openpyxl requests lxml pyyaml
 
       - name: 回填市值(股本 × 收盤)
         env:
@@ -60,3 +60,8 @@ jobs:
             echo "push 重試 $i ..."; sleep 6
           done
           echo "push 最終失敗(資料仍在 artifact / 可手動補)"; exit 1
+
+      # 放最後一步:資料已先 commit,測試只當「退化守門員」讓 workflow 變紅
+      # 11 檔金樣本(8持倉+3雷股)判讀若退化(如統一超不再是便宜陷阱、欣天然漏存貨爆衝)→ 整條 workflow 紅燈
+      - name: 體檢回歸測試(退化則 workflow 變紅)
+        run: python test_health_regression.py

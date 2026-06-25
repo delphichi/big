@@ -4,11 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       watch_file:
-        description: '名單檔 (預設全258檔,增量每輪補45;指定 tickers_us_core.txt 只跑持倉)'
+        description: '名單檔 (tickers_us_full.txt=全市場7874檔深抓;tickers_us.txt=精選)'
         required: false
-        default: 'tickers_us.txt'
+        default: 'tickers_us_full.txt'
+      max_fetch:
+        description: '本輪上限 (付費FMP一把梭設大;免費版設45)'
+        required: false
+        default: '4000'
   schedule:
-    # 每天 10:00 UTC — 增量模式每輪補 ~45 檔(FMP 免費 250/day),約 6 天跑完全 258
+    # 每天 10:00 UTC — 增量續抓(付費FMP 300/分;全市場分數輪跑完, 之後維持更新)
     - cron: "0 10 * * *"
 
 permissions:
@@ -17,7 +21,7 @@ permissions:
 jobs:
   us-fundamentals:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55       # 付費FMP 300/分;一輪約抓 ~3000 檔, 7874 約 3 輪續跑完
 
     steps:
       - name: Checkout repo
@@ -37,8 +41,8 @@ jobs:
       - name: Run US health check (FMP, 增量)
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
-          US_WATCH_FILE: ${{ inputs.watch_file || 'tickers_us.txt' }}
-          US_MAX_FETCH: "45"
+          US_WATCH_FILE: ${{ inputs.watch_file || 'tickers_us_full.txt' }}
+          US_MAX_FETCH: ${{ inputs.max_fetch || '4000' }}
         run: python fetch_fundamentals_us.py
 
       - name: 下游報表(拐點 + 未來PE,讀體檢表免費重算)

@@ -8,6 +8,10 @@ on:
         description: "指定抓取日期 YYYYMMDD(回補/驗證用,空=今天)"
         type: string
         default: ""
+      backfill_days:
+        description: "回補近N天建立一週快照(0=只跑單日)"
+        type: string
+        default: "0"
   schedule:
     # 10:00 UTC = 台北 18:00(收盤後PCF已更新);週一~週五
     - cron: "0 10 * * 1-5"
@@ -30,6 +34,7 @@ jobs:
       - name: 跑主動式ETF持股監看
         env:
           ETF_DATE: ${{ github.event.inputs.target_date }}
+          ETF_BACKFILL_DAYS: ${{ github.event.inputs.backfill_days }}
         run: python etf_holdings_monitor.py
 
       - name: Commit 快照

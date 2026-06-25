@@ -114,8 +114,10 @@ PICKS = [
 ]
 
 # 金融股(銀行/金控/保險/券商):營收/利潤率口徑不適用,輸出會標 🏦(估值 PER/PBR/殖利率仍有效)。
+# 手動清單(保底);main() 會再 ∪ 自動偵測(industry_category 含金融/保險),雙保險
 FINANCIALS = {"2890","2884","2880","2887","2891","2812","2836","6005","2850","2889",
-               "2882","2881","2851","2885","2883","2855"}
+               "2882","2881","2851","2885","2883","2855",
+               "5880","2886","2888","2892","5876"}    # 補:合庫金/兆豐金/新光金/第一金/上海商銀
 
 
 # ---------- FinMind ----------
@@ -137,6 +139,20 @@ def load_names(dl):
     except Exception as e:
         print("取股名對照失敗(改用代號):", e)
         return {}
+
+def load_financials(dl):
+    """自動偵測金融股:FinMind industry_category 含『金融』或『保險』即標記。
+    比手動白名單可靠(合庫金/兆豐金等不會再漏)。失敗則回空 set,退回手動清單。"""
+    try:
+        info = dl.taiwan_stock_info()
+        col = "industry_category"
+        if col not in info.columns:
+            return set()
+        fin = info[info[col].astype(str).str.contains("金融|保險", na=False)]
+        return {str(r["stock_id"]) for _, r in fin.iterrows()}
+    except Exception as e:
+        print("自動偵測金融股失敗(改用手動清單):", e)
+        return set()
 
 def _is_rate_limit(e):
     msg = str(e).lower()
@@ -523,6 +539,9 @@ def build_output(namemap):
                     pe_q = hist_c.get(q)
                     if pe_q is not None and pd.notna(pe_q):
                         row[label] = round(float(fwd_eps) * float(pe_q), 1)
+        # 金融股標記:從目前 FINANCIALS(含自動偵測)重新蓋章,修正舊快取漏標(免重抓)
+        if sid in FINANCIALS:
+            row["金融"] = "🏦"; hist_c["金融"] = "🏦"
         rows.append(row)
         hists.append(hist_c)
         name = namemap.get(sid, sid)
@@ -584,6 +603,8 @@ def main():
     t0 = time.time()
     dl = make_loader()
     namemap = load_names(dl)                            # 代號→官方股名
+    global FINANCIALS
+    FINANCIALS = FINANCIALS | load_financials(dl)       # 手動清單 ∪ 自動偵測(金融保險業)
     todo = [s for s in PICKS if load_cache(s) is None]
     print(f"總 {len(PICKS)} 檔,已完成 {len(PICKS)-len(todo)} 檔,待抓 {len(todo)} 檔")
     build_output(namemap)                              # 先用既有快取出一版(確保隨時有進度檔)

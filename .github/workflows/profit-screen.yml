@@ -1,0 +1,40 @@
+name: 全市場獲利初篩
+
+# 手動觸發(吃 API 額度,不排程每日跑)。用 date-bulk 掃全台股 ROE/EPS新高,
+# 找產業白名單漏掉的獲利型遺珠(如帆宣),輸出 data/獲利型候選.txt。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  profit-screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install FinMind pandas numpy requests
+
+      - name: 跑全市場獲利初篩
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python build_universe_profit.py
+
+      - name: Commit 候選清單
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/獲利型候選.txt || true
+          if git diff --staged --quiet; then echo "無變更"; exit 0; fi
+          git commit -m "data: 全市場獲利初篩 $(date -u +%Y%m%d)"
+          for i in 1 2 3 4 5; do
+            if git pull --rebase --autostash origin main && git push; then echo pushed; exit 0; fi
+            echo "重試 $i ..."; sleep 6
+          done
+          echo "push 失敗"; exit 1

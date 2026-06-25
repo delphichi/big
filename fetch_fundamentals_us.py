@@ -40,8 +40,9 @@ CORE  = "tickers_us_core.txt"          # 持倉/曾持有,永遠優先抓
 OUT   = "data/美股體檢總表.xlsx"
 KEY   = os.environ.get("FMP_API_KEY", "")
 
-RATE_SLEEP = 0.25                  # 每檔間隔(starter ~300/分)
-MAX_FETCH  = int(os.environ.get("US_MAX_FETCH", "45"))   # 每輪上限(45×5≈225 calls < 免費250/day)
+RATE_SLEEP = 0.5                   # 每檔間隔:5 calls/檔 × ~1檔/秒 ≈ 250-300/分,安全壓在 300 下(429 另有退避重試)
+# 付費 FMP 無 250/天 限制 → 預設一輪抓完(600 涵蓋全候選池);免費版請設 US_MAX_FETCH=45
+MAX_FETCH  = int(os.environ.get("US_MAX_FETCH", "600"))
 FRESH_DAYS = int(os.environ.get("US_FRESH_DAYS", "30"))  # 體檢表內 N 天內的不重抓(增量省額度)
 
 
@@ -78,15 +79,19 @@ def load_existing():
 
 
 def get(endpoint, **params):
-    """stable 端點:symbol 與 period/limit 都用 query parameter。"""
+    """stable 端點:symbol 與 period/limit 都用 query parameter。
+    撞 300/分上限(429)時退避重試,不再直接丟掉該檔(付費版可一直抓的前提)。"""
     if not KEY:
         raise RuntimeError("未設 FMP_API_KEY")
     params["apikey"] = KEY
-    r = requests.get(f"{BASE}/{endpoint}", params=params, timeout=20)
-    if r.status_code == 429:
-        raise RuntimeError("rate-limit")
-    r.raise_for_status()
-    return r.json()
+    for attempt in range(4):
+        r = requests.get(f"{BASE}/{endpoint}", params=params, timeout=20)
+        if r.status_code == 429:               # 觸到每分上限 → 等窗口重置再試
+            time.sleep(2 * (attempt + 1))
+            continue
+        r.raise_for_status()
+        return r.json()
+    raise RuntimeError("rate-limit")
 
 
 def cagr(v, n):

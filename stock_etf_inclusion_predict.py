@@ -3,10 +3,14 @@
 0050 + 富櫃50 納入預測引擎 — 在 ETF 強迫買入前先卡位
 =======================================================================
 邏輯:
-  0050 (上市前 50) / 富櫃50 006201 (上櫃前 50) 都是純市值規則;被納入 = 被動資金
-  強迫買;等公告/媒體報導,價格已先反映。本腳本在「市值排第 51-90 名 + 拐點 +
-  估值未爆」時就先標記,搶在 ETF 公告前進場。
-  另加「OTC 轉上市觀察」:上櫃大型股若轉上市即可直接卡進 TWSE 前段。
+  0050 (臺灣50指數) 真實納入規則(FTSE Russell,季審 3/6/9/12 月第三個週五):
+    ‧ 新納入:非成分股市值排名進入 **前 40 名** → 取得納入資格
+    ‧ 候補名單:排名 **51~60 名** → 依市值遞補(有成分股掉出才補進)
+    ‧ 剔除緩衝:現有成分股跌出 **前 61 名** 才剔除(避免頻繁換股)
+    ‧ 快速納入:IPO/轉上市股市值排名 **前 20 名** → 5 日內直接納入,替換最後一名
+  被納入 = 被動資金強迫買;等公告價格已反映。本腳本在「rank 41-60 卡位區 + 拐點
+  + 估值未爆」時先標記,搶在 ETF 公告前進場;另標「成分股逼近 61 名」= 被動賣壓。
+  另加「OTC 轉上市觀察」:上櫃大型股若轉上市(市值前20=快速納入)即可直接卡進。
 
 資料 :
   data/twse_marketcap_weight.csv — TWSE 全市場排名 + 市值佔大盤比重%
@@ -22,8 +26,8 @@
 
 評分流程:
   1. 把全市場 rank 100 對齊到我們 universe(用代號 join)
-  2. 候選 A = 我們已體檢 + rank 51-90(可直接給體檢/拐點/估值評分)
-  3. 候選 B = blind spot — rank 51-90 但不在我們 PICKS → 該加進去抓
+  2. 候選 A = 我們已體檢 + rank 41-60(真實卡位區:前40納入線~候補尾)
+  3. 候選 B = blind spot — rank 41-60 但不在我們 PICKS → 該加進去抓
   4. 加分:評等 A/B + 估值便宜或合理 + 未來估值(PEG<1/forward便宜) + 拐點 + 含金量
      ★ 未來估值加分:當下 PE 可能過熱,但用明年 EPS 算便宜(PEG<1)就加分救回 —
        這是「成長還沒被 price in」的卡位機會。與 PE位階(過去尺)互補。
@@ -54,11 +58,11 @@ def main():
     if not os.path.exists(WEIGHT):
         print(f"找不到 {WEIGHT},無法做排名預測"); return
     rank = pd.read_csv(WEIGHT, dtype={"代號": str})
-    THRESH_50 = float(rank[rank["rank"] == 50]["比重%"].iloc[0])
-    THRESH_90 = float(rank[rank["rank"] == 90]["比重%"].iloc[0])
-    THRESH_60 = float(rank[rank["rank"] == 60]["比重%"].iloc[0])
-    print(f"TWSE 真實門檻:rank 50 = {THRESH_50}% / 60 = {THRESH_60}% / 90 = {THRESH_90}%")
-    top90 = set(rank[rank["rank"] <= 90]["代號"])
+    THRESH_40 = float(rank[rank["rank"] == 40]["比重%"].iloc[0])   # 新納入線
+    THRESH_60 = float(rank[rank["rank"] == 60]["比重%"].iloc[0])   # 候補尾
+    THRESH_61 = float(rank[rank["rank"] == 61]["比重%"].iloc[0])   # 剔除線
+    print(f"TWSE 真實門檻:rank 40(納入) = {THRESH_40}% / 60(候補尾) = {THRESH_60}% / 61(剔除) = {THRESH_61}%")
+    top60 = set(rank[rank["rank"] <= 60]["代號"])
     rank_lookup = dict(zip(rank["代號"], rank["rank"]))
     weight_lookup = dict(zip(rank["代號"], rank["比重%"]))
     name_lookup = dict(zip(rank["代號"], rank["名稱"]))
@@ -118,11 +122,11 @@ def main():
     else:
         OTC_R50 = OTC_R90 = None
 
-    # ---- 候選 A:我們 universe 內 + rank 51-90 + 不在 0050 ----
+    # ---- 候選 A:我們 universe 內 + rank 41-60 卡位區 + 不在 0050 ----
     cand_a = base[
         base["TWSE排名"].notna() &
-        (base["TWSE排名"] >= 51) &
-        (base["TWSE排名"] <= 90) &
+        (base["TWSE排名"] >= 41) &
+        (base["TWSE排名"] <= 60) &
         (base["是否0050"] == "")
     ].copy()
 
@@ -169,13 +173,14 @@ def main():
             if mo >= 30: s += 15
             elif mo >= 15: s += 10
             elif mo >= 0: s += 3
-        # 距離 0050 門檻越近(rank 越小)越加分
+        # 距離 0050 真實門檻越近越加分(前40=納入線,51-60=候補,跌61=剔除)
         rk = r.get("TWSE排名")
         if pd.notna(rk):
-            if rk <= 55: s += 25      # 緊貼門檻
-            elif rk <= 65: s += 18
-            elif rk <= 75: s += 10
-            else: s += 3
+            if rk <= 42: s += 30      # 緊貼前40納入線:再升一階就被動買盤強迫納入
+            elif rk <= 50: s += 22    # 距前40一步之遙
+            elif rk <= 55: s += 14    # 候補區前段
+            elif rk <= 60: s += 8     # 候補區尾(51-60 依市值遞補)
+            else: s += 2
         return s
 
     if len(cand_a):
@@ -185,7 +190,7 @@ def main():
     # ---- 候選 B:blind spot — rank 51-90 但不在我們 PICKS 也不在 0050 ----
     our_codes = set(val["代號"].astype(str)) if not val.empty else set()
     spot = rank[
-        (rank["rank"] >= 51) & (rank["rank"] <= 90) &
+        (rank["rank"] >= 41) & (rank["rank"] <= 60) &
         (~rank["代號"].isin(KNOWN_0050)) &
         (~rank["代號"].isin(our_codes))
     ].copy()
@@ -198,8 +203,8 @@ def main():
     if not otc_rank.empty:
         cand_otc_a = base[
             base["OTC排名"].notna() &
-            (base["OTC排名"] >= 51) &
-            (base["OTC排名"] <= 90)
+            (base["OTC排名"] >= 41) &
+            (base["OTC排名"] <= 60)
         ].copy()
 
         def score_otc(r):
@@ -232,10 +237,11 @@ def main():
                 elif mo >= 0: s += 3
             rk = r.get("OTC排名")
             if pd.notna(rk):
-                if rk <= 55: s += 25
-                elif rk <= 65: s += 18
-                elif rk <= 75: s += 10
-                else: s += 3
+                if rk <= 42: s += 30
+                elif rk <= 50: s += 22
+                elif rk <= 55: s += 14
+                elif rk <= 60: s += 8
+                else: s += 2
             return s
 
         if len(cand_otc_a):
@@ -245,27 +251,41 @@ def main():
         # 富櫃50 blind spot
         our = set(val["代號"].astype(str)) if not val.empty else set()
         cand_otc_b = otc_rank[
-            (otc_rank["rank"] >= 51) & (otc_rank["rank"] <= 90) &
+            (otc_rank["rank"] >= 41) & (otc_rank["rank"] <= 60) &
             (~otc_rank["代號"].isin(our))
         ].copy().rename(columns={"rank": "OTC排名"})
         cand_otc_b["建議"] = "加入 PICKS 抓體檢"
 
     # ---- OTC 轉上市觀察(上櫃大型股一旦轉上市即直接卡進 0050/TWSE 前段)----
     # 上櫃股不在 0050 選股池;但「轉上市」是已知催化劑(信驊/環球晶等若上市即進前 50)。
-    # 用 TWSE 絕對市值門檻(億)比對上櫃市值,標出「轉上市即 0050 候選 / 即進 51-90」。
+    # 依真實規則:市值前20=快速納入(5日內直接入)、前40=納入線、41-60=候補。
     transfer = pd.DataFrame()
-    TWSE_R50_YI = float(rank[rank["rank"] == 50]["市值億"].iloc[0]) if "市值億" in rank.columns else None
-    TWSE_R90_YI = float(rank[rank["rank"] == 90]["市值億"].iloc[0]) if "市值億" in rank.columns else None
-    if os.path.exists(OTC) and TWSE_R50_YI:
+    TWSE_R20_YI = float(rank[rank["rank"] == 20]["市值億"].iloc[0]) if "市值億" in rank.columns else None
+    TWSE_R40_YI = float(rank[rank["rank"] == 40]["市值億"].iloc[0]) if "市值億" in rank.columns else None
+    TWSE_R60_YI = float(rank[rank["rank"] == 60]["市值億"].iloc[0]) if "市值億" in rank.columns else None
+    if os.path.exists(OTC) and TWSE_R40_YI:
         otc = pd.read_csv(OTC, dtype={"代號": str})
-        big = otc[otc["市值億"] >= TWSE_R90_YI].copy()
+        big = otc[otc["市值億"] >= TWSE_R60_YI].copy()
         def tier(m):
-            if m >= TWSE_R50_YI:  return "🔥轉上市即進0050(前50)"
-            return "⭐轉上市即進51-90"
+            if m >= TWSE_R20_YI:  return "🚀轉上市快速納入(前20,5日內直接入)"
+            if m >= TWSE_R40_YI:  return "🔥轉上市即進0050(前40納入線)"
+            return "⭐轉上市即進候補(41-60)"
         big["轉上市定位"] = big["市值億"].apply(tier)
         big["在我們PICKS"] = big["代號"].apply(lambda c: "✓" if c in (set(val["代號"].astype(str)) if not val.empty else set()) else "")
         transfer = big[["rank", "代號", "名稱", "市值億", "轉上市定位", "在我們PICKS"]].rename(
             columns={"rank": "OTC排名"})
+
+    # ---- 0050 剔除警報:現有成分股逼近/跌出 61 名 = 被動資金即將賣壓(SELL 訊號)----
+    # 規則:成分股跌出前 61 名才剔除。rank ≥ 58 即進入危險區,先標記預警。
+    evict = rank[(rank["代號"].isin(KNOWN_0050)) & (rank["rank"] >= 58)].copy()
+    if not evict.empty:
+        def evtier(rk):
+            if rk >= 61: return "🔴已跌出61名(剔除壓力)"
+            if rk >= 60: return "🟠逼近剔除線(60)"
+            return "🟡接近危險區(58-59)"
+        evict["剔除警報"] = evict["rank"].apply(evtier)
+        evict["在我們PICKS"] = evict["代號"].apply(lambda c: "✓" if c in (set(val["代號"].astype(str)) if not val.empty else set()) else "")
+        evict = evict[["rank", "代號", "名稱", "比重%", "剔除警報", "在我們PICKS"]].rename(columns={"rank": "TWSE排名"})
 
     # ---- 輸出 ----
     out_cols = ["TWSE排名", "代號", "名稱", "大盤比重%", "納入潛力分", "評等", "品質總分",
@@ -303,14 +323,17 @@ def main():
             otc_rank.head(100).to_excel(xw, sheet_name="OTC前100", index=False)
         if not transfer.empty:
             transfer.to_excel(xw, sheet_name="OTC轉上市觀察", index=False)
+        if not evict.empty:
+            evict.to_excel(xw, sheet_name="0050剔除警報", index=False)
         thresh_df = pd.DataFrame([
-            {"項目": "rank 50 (邊緣) 比重%", "值": THRESH_50},
-            {"項目": "rank 60 比重%", "值": THRESH_60},
-            {"項目": "rank 90 (候選下限) 比重%", "值": THRESH_90},
+            {"項目": "rank 40 (納入線) 比重%", "值": THRESH_40},
+            {"項目": "rank 60 (候補尾) 比重%", "值": THRESH_60},
+            {"項目": "rank 61 (剔除線) 比重%", "值": THRESH_61},
             {"項目": "我們 universe 在 TWSE 前 100 內", "值": int((in_twse["TWSE排名"] <= 100).sum())},
-            {"項目": "我們 universe 在 rank 51-90 內", "值": int(((in_twse["TWSE排名"] >= 51) & (in_twse["TWSE排名"] <= 90)).sum())},
+            {"項目": "我們 universe 在 rank 41-60 卡位區", "值": int(((in_twse["TWSE排名"] >= 41) & (in_twse["TWSE排名"] <= 60)).sum())},
             {"項目": "候選A (已體檢)", "值": len(cand_a)},
             {"項目": "候選B (blind spot)", "值": len(spot)},
+            {"項目": "0050 剔除警報 (成分股逼近61名)", "值": len(evict)},
         ])
         thresh_df.to_excel(xw, sheet_name="門檻說明", index=False)
 
@@ -334,8 +357,11 @@ def main():
         print(f"\n富櫃50 候選B (blind) Top 15:\n"
               f"{cand_otc_b.head(15)[['OTC排名','代號','名稱','市值億']].to_string(index=False)}")
     if not transfer.empty:
-        print(f"\nOTC 轉上市觀察 {len(transfer)} 檔(轉上市即可進 TWSE 前 90):\n"
+        print(f"\nOTC 轉上市觀察 {len(transfer)} 檔(轉上市即可進 TWSE 前 60):\n"
               f"{transfer.to_string(index=False)}")
+    if not evict.empty:
+        print(f"\n🔴 0050 剔除警報 {len(evict)} 檔(成分股逼近 61 名=被動賣壓):\n"
+              f"{evict.to_string(index=False)}")
     return cand_a
 
 

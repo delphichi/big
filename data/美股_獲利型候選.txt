@@ -1,25 +1,32 @@
-# 美股全市場獲利初篩(SEC)  符合 229 檔(ROE≥15.0 或 ROIC≥12.0,且 含金量≥0.8)
-# 產生:2026-06-25  遺珠(不在觀察名單)=185 檔
+# 美股全市場獲利初篩(SEC)  符合 299 檔(ROE≥15.0 或 ROIC≥12.0,且 含金量≥0.8)
+# 產生:2026-06-25  遺珠(不在觀察名單)=242 檔
 # 代號  ROE  ROIC  含金量  毛利  FCF(B)  遺珠
+WDLF  ROE=-66.94  ROIC=59.62  含金量=2.83  毛利=98.05  FCF=None  ✔
+SBUX  ROE=-41.26  ROIC=58.05  含金量=2.27  毛利=82.74  FCF=5.698  ✔
 AGEN  ROE=32.85  ROIC=57.89  含金量=2.4  毛利=99.67  FCF=-0.181  ✔
 DVN  ROE=17.8  ROIC=54.29  含金量=2.46  毛利=78.46  FCF=2.825  ✔
 MUSA  ROE=38.14  ROIC=53.7  含金量=3.0  毛利=90.77  FCF=0.453  ✔
+UI  ROE=43.95  ROIC=52.35  含金量=0.84  毛利=42.84  FCF=0.427  ✔
 MPC  ROE=17.91  ROIC=51.39  含金量=2.68  毛利=12.81  FCF=5.838  ✔
 LIMX  ROE=69.8  ROIC=51.24  含金量=1.43  毛利=67.05  FCF=None  ✔
+WSM  ROE=49.24  ROIC=48.34  含金量=0.95  毛利=41.87  FCF=0.654  
 GUER  ROE=64.52  ROIC=47.47  含金量=1.04  毛利=63.22  FCF=-0.012  ✔
 ORLY  ROE=-219.09  ROIC=45.76  含金量=1.22  毛利=51.29  FCF=2.0  
 CURV  ROE=-2.54  ROIC=45.1  含金量=5.57  毛利=34.44  FCF=0.008  ✔
 NOG  ROE=9.74  ROIC=44.98  含金量=7.04  毛利=85.01  FCF=1.223  ✔
 ABIT  ROE=46.27  ROIC=44.49  含金量=1.67  毛利=11.86  FCF=None  ✔
 IDXX  ROE=54.76  ROIC=44.02  含金量=0.86  毛利=60.08  FCF=0.604  
-AISPW  ROE=24.89  ROIC=41.87  含金量=2.78  毛利=56.37  FCF=None  ✔
 AISP  ROE=24.89  ROIC=41.87  含金量=2.78  毛利=56.37  FCF=None  ✔
+AISPW  ROE=24.89  ROIC=41.87  含金量=2.78  毛利=56.37  FCF=None  ✔
 ADBE  ROE=58.49  ROIC=41.54  含金量=1.06  毛利=88.17  FCF=6.854  
 AGSS  ROE=50.13  ROIC=40.67  含金量=1.08  毛利=11.27  FCF=-0.002  ✔
 FUST  ROE=5.44  ROIC=40.17  含金量=20.04  毛利=100.0  FCF=None  ✔
+TGNT  ROE=44.4  ROIC=39.7  含金量=1.0  毛利=6.92  FCF=None  ✔
 AZO  ROE=-87.25  ROIC=39.0  含金量=1.32  毛利=51.83  FCF=2.514  ✔
+SNAL  ROE=-11.72  ROIC=38.8  含金量=3.5  毛利=37.59  FCF=None  ✔
 AN  ROE=45.2  ROIC=38.03  含金量=1.39  毛利=18.98  FCF=1.074  ✔
 FICO  ROE=-23.49  ROIC=37.42  含金量=1.08  毛利=80.71  FCF=0.529  
+ULTA  ROE=49.71  ROIC=36.1  含金量=0.87  毛利=39.06  FCF=0.76  
 MO  ROE=-220.43  ROIC=35.73  含金量=1.65  毛利=58.98  FCF=11.483  ✔
 PURE  ROE=48.35  ROIC=35.65  含金量=0.86  毛利=58.05  FCF=-0.003  ✔
 BLDR  ROE=34.42  ROIC=34.89  含金量=0.93  毛利=34.56  FCF=0.934  ✔
@@ -39,6 +46,8 @@ BIIB  ROE=6.81  ROIC=25.92  含金量=1.42  毛利=73.73  FCF=1.222  ✔
 EAT  ROE=30.22  ROIC=25.52  含金量=1.52  毛利=84.0  FCF=-0.001  ✔
 FIZZ  ROE=25.58  ROIC=25.52  含金量=1.49  毛利=35.0  FCF=0.208  ✔
 GPI  ROE=20.49  ROIC=25.08  含金量=1.35  毛利=16.76  FCF=0.598  ✔
+WM  ROE=22.28  ROIC=24.4  含金量=2.18  毛利=38.56  FCF=2.3  
+TDG  ROE=-16.17  ROIC=24.33  含金量=1.34  毛利=59.11  FCF=1.91  
 AVGO  ROE=46.61  ROIC=23.92  含金量=1.59  毛利=72.37  FCF=18.024  
 ADTN  ROE=14.53  ROIC=23.5  含金量=1.3  毛利=30.41  FCF=0.035  ✔
 COLL  ROE=7.32  ROIC=23.07  含金量=5.24  毛利=55.38  FCF=0.118  ✔
@@ -46,19 +55,24 @@ IESC  ROE=4.19  ROIC=22.47  含金量=1.16  毛利=24.64  FCF=-0.002  ✔
 NFG  ROE=-576.36  ROIC=22.28  含金量=2.26  毛利=80.54  FCF=0.056  ✔
 MCD  ROE=-653.81  ROIC=22.09  含金量=1.15  毛利=90.02  FCF=7.289  
 ATKR  ROE=39.49  ROIC=22.08  含金量=1.04  毛利=33.84  FCF=0.399  ✔
+ROL  ROE=32.27  ROIC=21.73  含金量=1.04  毛利=70.22  FCF=0.433  
 AMAT  ROE=26.92  ROIC=21.07  含金量=1.27  毛利=47.42  FCF=7.137  
 CPRT  ROE=22.6  ROIC=20.77  含金量=1.09  毛利=96.02  FCF=0.839  
+REI  ROE=4.13  ROIC=20.71  含金量=5.18  毛利=98.82  FCF=None  ✔
 LAUR  ROE=9.43  ROIC=20.54  含金量=1.73  毛利=25.67  FCF=0.144  ✔
 MTCH  ROE=-261.51  ROIC=20.4  含金量=1.46  毛利=72.0  FCF=0.76  ✔
 CF  ROE=12.21  ROIC=20.39  含金量=5.17  毛利=39.68  FCF=3.007  ✔
 LECO  ROE=35.75  ROIC=20.14  含金量=0.9  毛利=34.7  FCF=0.391  ✔
-ASO  ROE=23.05  ROIC=19.25  含金量=1.04  毛利=34.38  FCF=0.366  ✔
+WING  ROE=-16.73  ROIC=19.66  含金量=0.94  毛利=86.94  FCF=0.096  ✔
 APP  ROE=29.49  ROIC=19.25  含金量=2.13  毛利=88.98  FCF=None  
+ASO  ROE=23.05  ROIC=19.25  含金量=1.04  毛利=34.38  FCF=0.366  ✔
 ENVA  ROE=14.24  ROIC=19.23  含金量=5.89  毛利=58.15  FCF=1.131  ✔
 DLTR  ROE=28.78  ROIC=19.08  含金量=2.15  毛利=34.85  FCF=1.005  ✔
 CAL  ROE=17.85  ROIC=19.02  含金量=0.8  毛利=45.43  FCF=0.042  ✔
+VRSK  ROE=-53.72  ROIC=18.91  含金量=1.81  毛利=67.79  FCF=0.905  ✔
 BBSI  ROE=-0.69  ROIC=18.7  含金量=29.76  毛利=22.41  FCF=-0.06  ✔
 HUBG  ROE=17.5  ROIC=18.67  含金量=1.27  毛利=8.35  FCF=0.293  ✔
+TRGP  ROE=42.76  ROIC=18.51  含金量=2.8  毛利=33.27  FCF=1.607  ✔
 JKHY  ROE=19.4  ROIC=18.5  含金量=1.25  毛利=24.56  FCF=0.48  ✔
 HLF  ROE=-38.12  ROIC=18.45  含金量=1.13  毛利=76.67  FCF=0.068  ✔
 ABBV  ROE=-71.81  ROIC=18.42  含金量=3.09  毛利=63.28  FCF=14.011  ✔
@@ -69,29 +83,39 @@ MSFT  ROE=19.51  ROIC=18.04  含金量=1.23  毛利=68.22  FCF=54.769
 PAYX  ROE=38.11  ROIC=17.99  含金量=1.3  毛利=70.45  FCF=1.854  ✔
 MNKD  ROE=15.9  ROIC=17.97  含金量=1.78  毛利=90.14  FCF=-0.033  ✔
 JBSS  ROE=16.21  ROIC=17.64  含金量=0.83  毛利=22.45  FCF=0.023  ✔
+WHD  ROE=14.65  ROIC=17.62  含金量=1.18  毛利=37.05  FCF=None  ✔
 CSCO  ROE=24.73  ROIC=17.54  含金量=1.11  毛利=63.27  FCF=12.772  
 MCO  ROE=55.28  ROIC=17.42  含金量=1.58  毛利=71.74  FCF=2.315  
+SKAS  ROE=6.5  ROIC=17.35  含金量=1.92  毛利=50.14  FCF=0.001  ✔
+SFM  ROE=22.64  ROIC=17.33  含金量=2.62  毛利=37.36  FCF=0.667  ✔
+WST  ROE=18.99  ROIC=16.72  含金量=0.95  毛利=38.3  FCF=0.227  
 LNG  ROE=69.99  ROIC=16.58  含金量=3.25  毛利=93.72  FCF=6.387  ✔
 PNRG  ROE=5.22  ROIC=16.55  含金量=10.7  毛利=96.66  FCF=None  ✔
 GT  ROE=-1.6  ROIC=16.49  含金量=51.56  毛利=17.2  FCF=-3.619  ✔
 LBRT  ROE=25.38  ROIC=16.24  含金量=1.15  毛利=28.46  FCF=0.067  ✔
 LNTH  ROE=22.15  ROIC=16.24  含金量=1.32  毛利=54.29  FCF=0.338  ✔
+VIASP  ROE=22.93  ROIC=16.23  含金量=3.93  毛利=27.24  FCF=0.057  ✔
 NVDA  ROE=17.22  ROIC=16.1  含金量=1.41  毛利=64.05  FCF=45.402  
 NSIT  ROE=13.84  ROIC=16.09  含金量=0.91  毛利=18.37  FCF=0.153  ✔
 GNTX  ROE=16.31  ROIC=16.02  含金量=1.26  毛利=32.9  FCF=0.38  ✔
 HSY  ROE=27.79  ROIC=15.99  含金量=1.85  毛利=39.8  FCF=1.702  ✔
+WMS  ROE=27.28  ROIC=15.98  含金量=1.54  毛利=36.42  FCF=0.667  ✔
 CDNS  ROE=16.26  ROIC=15.96  含金量=1.26  毛利=99.27  FCF=1.227  
 ABG  ROE=14.94  ROIC=15.93  含金量=1.67  毛利=18.51  FCF=0.956  ✔
 COST  ROE=20.2  ROIC=15.77  含金量=2.04  毛利=6.42  FCF=9.363  
 CDW  ROE=43.56  ROIC=15.76  含金量=1.32  毛利=21.71  FCF=1.344  ✔
-BXCAP  ROE=-5.25  ROIC=15.36  含金量=22.21  毛利=74.57  FCF=0.389  ✔
+RL  ROE=22.75  ROIC=15.41  含金量=1.3  毛利=66.83  FCF=0.665  
 BOX  ROE=-5.25  ROIC=15.36  含金量=22.21  毛利=74.57  FCF=0.389  ✔
+BXCAP  ROE=-5.25  ROIC=15.36  含金量=22.21  毛利=74.57  FCF=0.389  ✔
+STLD  ROE=22.74  ROIC=15.36  含金量=1.59  毛利=19.23  FCF=1.728  
 LAMR  ROE=46.54  ROIC=15.34  含金量=0.81  毛利=66.9  FCF=0.319  ✔
 LKQ  ROE=14.68  ROIC=15.22  含金量=0.93  毛利=40.44  FCF=0.693  ✔
 COLM  ROE=10.9  ROIC=15.17  含金量=0.86  毛利=49.67  FCF=0.09  ✔
+YUMC  ROE=15.31  ROIC=15.11  含金量=1.89  毛利=46.78  FCF=0.862  ✔
 MOH  ROE=26.67  ROIC=15.06  含金量=1.55  毛利=4.33  FCF=1.579  ✔
 LRDC  ROE=6.43  ROIC=15.03  含金量=1.12  毛利=100.0  FCF=None  ✔
 CHRW  ROE=21.57  ROIC=14.94  含金量=0.85  毛利=92.36  FCF=0.28  ✔
+SKFG  ROE=21.58  ROIC=14.87  含金量=1.16  毛利=17.52  FCF=None  ✔
 NEU  ROE=23.5  ROIC=14.84  含金量=0.83  毛利=29.31  FCF=0.292  ✔
 IBP  ROE=34.94  ROIC=14.81  含金量=1.28  毛利=33.2  FCF=0.232  ✔
 NFLX  ROE=19.17  ROIC=14.78  含金量=1.32  毛利=2.38  FCF=7.45  
@@ -101,18 +125,33 @@ PAYC  ROE=28.71  ROIC=14.74  含金量=2.55  毛利=83.63  FCF=0.434  ✔
 MSM  ROE=21.54  ROIC=14.59  含金量=1.06  毛利=40.73  FCF=0.237  ✔
 DXCM  ROE=16.93  ROIC=14.56  含金量=1.24  毛利=61.97  FCF=0.299  
 FDS  ROE=22.24  ROIC=14.52  含金量=0.89  毛利=53.44  FCF=0.335  ✔
+REAL  ROE=20.86  ROIC=14.49  含金量=1.49  毛利=68.79  FCF=-0.135  ✔
+WFCF  ROE=6.14  ROIC=14.45  含金量=5.18  毛利=41.0  FCF=0.003  ✔
 MGPI  ROE=14.42  ROIC=14.44  含金量=1.15  毛利=36.22  FCF=0.023  ✔
+TBTC  ROE=6.15  ROIC=14.41  含金量=3.56  毛利=71.14  FCF=0.003  ✔
 CWCO  ROE=12.48  ROIC=14.38  含金量=0.99  毛利=34.64  FCF=0.023  ✔
 JBI  ROE=20.67  ROIC=14.36  含金量=1.31  毛利=41.2  FCF=0.132  ✔
 BMI  ROE=14.75  ROIC=14.34  含金量=0.8  毛利=40.4  FCF=0.071  ✔
+SEIC  ROE=19.69  ROIC=14.34  含金量=1.31  毛利=29.89  FCF=0.592  ✔
 BOOM  ROE=10.36  ROIC=14.33  含金量=0.84  毛利=29.64  FCF=0.01  ✔
 INOD  ROE=8.38  ROIC=14.32  含金量=1.66  毛利=33.16  FCF=0.011  ✔
+SAH  ROE=21.07  ROIC=14.32  含金量=2.34  毛利=15.55  FCF=0.293  ✔
+SAIC  ROE=23.33  ROIC=14.32  含金量=1.2  毛利=11.61  FCF=0.373  ✔
+SO  ROE=14.36  ROIC=14.32  含金量=0.97  毛利=96.77  FCF=-2.479  ✔
+SOJC  ROE=14.36  ROIC=14.32  含金量=0.97  毛利=96.77  FCF=-2.479  ✔
+SOJD  ROE=14.36  ROIC=14.32  含金量=0.97  毛利=96.77  FCF=-2.479  ✔
+SOJE  ROE=14.36  ROIC=14.32  含金量=0.97  毛利=96.77  FCF=-2.479  ✔
+SOJF  ROE=14.36  ROIC=14.32  含金量=0.97  毛利=96.77  FCF=-2.479  ✔
+SOMN  ROE=14.36  ROIC=14.32  含金量=0.97  毛利=96.77  FCF=-2.479  ✔
 PDEX  ROE=18.66  ROIC=14.31  含金量=0.93  毛利=31.36  FCF=0.006  ✔
 ADSK  ROE=25.27  ROIC=14.18  含金量=2.75  毛利=90.65  FCF=2.179  
 NGVC  ROE=11.96  ROIC=14.17  含金量=1.53  毛利=29.11  FCF=0.007  ✔
+RS  ROE=7.09  ROIC=14.04  含金量=1.94  毛利=58.87  FCF=0.614  ✔
 META  ROE=17.8  ROIC=14.03  含金量=1.64  毛利=80.9  FCF=39.741  
+SNA  ROE=16.58  ROIC=13.98  含金量=1.16  毛利=36.75  FCF=None  
 HRMY  ROE=14.95  ROIC=13.97  含金量=1.0  毛利=79.46  FCF=0.136  ✔
 HCC  ROE=15.13  ROIC=13.91  含金量=1.13  毛利=40.91  FCF=0.205  ✔
+SCCO  ROE=17.1  ROIC=13.9  含金量=1.8  毛利=53.45  FCF=2.522  ✔
 PCTY  ROE=13.67  ROIC=13.88  含金量=1.03  毛利=73.39  FCF=0.153  ✔
 ETST  ROE=4.22  ROIC=13.86  含金量=1.85  毛利=66.88  FCF=0.0  ✔
 EBF  ROE=14.97  ROIC=13.81  含金量=1.39  毛利=29.96  FCF=0.059  ✔
@@ -121,6 +160,7 @@ AMPH  ROE=26.86  ROIC=13.72  含金量=1.52  毛利=53.85  FCF=0.146  ✔
 GOOG  ROE=17.69  ROIC=13.64  含金量=1.34  毛利=57.12  FCF=68.329  
 GOOGL  ROE=17.69  ROIC=13.64  含金量=1.34  毛利=57.12  FCF=68.329  
 GFMH  ROE=16.4  ROIC=13.55  含金量=1.22  毛利=100.0  FCF=None  ✔
+YELP  ROE=17.34  ROIC=13.52  含金量=2.79  毛利=95.42  FCF=0.273  ✔
 EXP  ROE=32.39  ROIC=13.48  含金量=1.07  毛利=30.33  FCF=0.413  ✔
 LZ  ROE=9.76  ROIC=13.43  含金量=8.92  毛利=64.54  FCF=0.097  ✔
 KLIC  ROE=23.54  ROIC=13.33  含金量=0.95  毛利=53.59  FCF=0.161  ✔
@@ -130,6 +170,7 @@ DCI  ROE=18.12  ROIC=13.15  含金量=1.21  毛利=33.48  FCF=0.277  ✔
 LUCK  ROE=-24.12  ROIC=13.09  含金量=1.29  毛利=27.73  FCF=-0.084  ✔
 APH  ROE=15.15  ROIC=13.07  含金量=1.06  毛利=32.88  FCF=1.789  
 BRC  ROE=9.47  ROIC=12.99  含金量=1.11  毛利=48.75  FCF=0.107  ✔
+WEYS  ROE=14.21  ROIC=12.97  含金量=1.43  毛利=45.3  FCF=0.04  ✔
 KTB  ROE=34.64  ROIC=12.96  含金量=0.92  毛利=41.49  FCF=0.18  ✔
 PAG  ROE=20.33  ROIC=12.84  含金量=1.25  毛利=16.62  FCF=1.071  ✔
 ARW  ROE=5.53  ROIC=12.74  含金量=2.09  毛利=12.32  FCF=0.685  ✔
@@ -144,26 +185,34 @@ PGNY  ROE=13.7  ROIC=12.43  含金量=1.42  毛利=22.23  FCF=0.08  ✔
 MPAA  ROE=-18.51  ROIC=12.36  含金量=0.96  毛利=18.47  FCF=-0.051  ✔
 KEYS  ROE=18.72  ROIC=12.35  含金量=1.09  毛利=64.19  FCF=1.115  
 ALSN  ROE=36.57  ROIC=12.34  含金量=1.02  毛利=49.2  FCF=0.628  ✔
+RCL  ROE=21.07  ROIC=12.26  含金量=1.81  毛利=44.97  FCF=1.451  
 DG  ROE=19.11  ROIC=12.25  含金量=1.27  毛利=30.49  FCF=0.874  
 EXEL  ROE=17.05  ROIC=12.23  含金量=1.55  毛利=96.41  FCF=0.482  ✔
+TDC  ROE=15.44  ROIC=12.2  含金量=3.43  毛利=60.41  FCF=0.283  ✔
 HEI  ROE=10.28  ROIC=12.19  含金量=0.96  毛利=39.4  FCF=0.412  ✔
+SWKS  ROE=14.64  ROIC=12.18  含金量=2.97  毛利=44.29  FCF=2.287  ✔
 NBR  ROE=9.76  ROIC=12.17  含金量=7.03  毛利=52.01  FCF=-0.211  ✔
 NBRWF  ROE=9.76  ROIC=12.17  含金量=7.03  毛利=52.01  FCF=-0.211  ✔
 CPB  ROE=18.5  ROIC=12.09  含金量=1.23  毛利=30.51  FCF=0.515  ✔
 CBOE  ROE=14.93  ROIC=12.02  含金量=5.11  毛利=49.39  FCF=4.054  
 BLD  ROE=24.34  ROIC=11.99  含金量=1.01  毛利=30.45  FCF=0.523  ✔
 A  ROE=15.68  ROIC=11.83  含金量=1.31  毛利=49.86  FCF=1.129  
+TPB  ROE=22.0  ROIC=11.8  含金量=1.68  毛利=55.73  FCF=0.061  ✔
 GL  ROE=15.96  ROIC=11.79  含金量=1.71  毛利=23.21  FCF=1.621  ✔
 MIDD  ROE=17.12  ROIC=11.73  含金量=0.88  毛利=40.39  FCF=0.279  ✔
 GLPI  ROE=15.64  ROIC=11.48  含金量=1.36  毛利=96.49  FCF=0.96  ✔
 LPRO  ROE=23.37  ROIC=11.38  含金量=3.9  毛利=79.65  FCF=0.068  ✔
+URI  ROE=26.76  ROIC=11.37  含金量=1.78  毛利=168.15  FCF=2.505  
 EBAY  ROE=64.1  ROIC=11.13  含金量=1.0  毛利=72.09  FCF=2.355  
 BTCY  ROE=31.16  ROIC=11.07  含金量=0.94  毛利=74.31  FCF=None  ✔
 ON  ROE=17.05  ROIC=10.77  含金量=1.6  毛利=42.42  FCF=1.112  ✔
+SCI  ROE=34.64  ROIC=10.71  含金量=1.97  毛利=26.86  FCF=0.791  ✔
 ATEN  ROE=22.98  ROIC=10.51  含金量=1.34  毛利=79.44  FCF=0.057  ✔
 FTLF  ROE=19.48  ROIC=10.32  含金量=0.99  毛利=47.47  FCF=0.009  ✔
 PKG  ROE=17.92  ROIC=10.18  含金量=1.47  毛利=22.39  FCF=0.655  ✔
 AMT  ROE=73.2  ROIC=10.12  含金量=1.67  毛利=95.94  FCF=2.737  
+SANM  ROE=18.12  ROIC=9.86  含金量=0.9  毛利=8.37  FCF=0.182  ✔
+WMG  ROE=60.57  ROIC=9.72  含金量=2.15  毛利=46.32  FCF=0.843  ✔
 KVUE  ROE=15.93  ROIC=9.64  含金量=1.1  毛利=56.04  FCF=1.431  ✔
 PEG  ROE=19.95  ROIC=9.6  含金量=1.53  毛利=75.23  FCF=1.169  
 KLAC  ROE=68.62  ROIC=9.54  含金量=0.94  毛利=60.39  FCF=3.473  
@@ -177,56 +226,77 @@ GEHC  ROE=16.48  ROIC=8.68  含金量=0.91  毛利=40.82  FCF=1.065  ✔
 ENTG  ROE=17.71  ROIC=8.34  含金量=2.54  毛利=42.61  FCF=0.11  ✔
 CSW  ROE=19.34  ROIC=8.33  含金量=1.46  毛利=44.24  FCF=0.137  ✔
 IQV  ROE=21.2  ROIC=8.22  含金量=1.53  毛利=22.06  FCF=1.387  
-GENVR  ROE=23.25  ROIC=8.11  含金量=1.59  毛利=80.76  FCF=0.954  ✔
 GEN  ROE=23.25  ROIC=8.11  含金量=1.59  毛利=80.76  FCF=0.954  ✔
+GENVR  ROE=23.25  ROIC=8.11  含金量=1.59  毛利=80.76  FCF=0.954  ✔
 CRM  ROE=17.93  ROIC=8.1  含金量=2.54  毛利=76.97  FCF=14.915  
+TMUS  ROE=15.92  ROIC=7.93  含金量=2.28  毛利=87.62  FCF=10.697  ✔
+TMUSI  ROE=15.92  ROIC=7.93  含金量=2.28  毛利=87.62  FCF=10.697  ✔
+TMUSL  ROE=15.92  ROIC=7.93  含金量=2.28  毛利=87.62  FCF=10.697  ✔
+TMUSZ  ROE=15.92  ROIC=7.93  含金量=2.28  毛利=87.62  FCF=10.697  ✔
 PWDY  ROE=27.38  ROIC=7.89  含金量=1.79  毛利=29.43  FCF=None  ✔
 BFS  ROE=16.19  ROIC=7.86  含金量=2.87  毛利=69.49  FCF=-0.04  ✔
 PSA  ROE=22.19  ROIC=7.79  含金量=1.33  毛利=42.23  FCF=None  ✔
 BSY  ROE=28.38  ROIC=7.39  含金量=2.02  毛利=78.6  FCF=0.687  ✔
 AXIL  ROE=16.42  ROIC=6.89  含金量=1.13  毛利=71.33  FCF=0.002  ✔
 OEC  ROE=22.64  ROIC=6.68  含金量=1.32  毛利=22.84  FCF=-0.029  ✔
+WSC  ROE=24.33  ROIC=5.31  含金量=3.35  毛利=56.37  FCF=0.681  ✔
 NOW  ROE=15.72  ROIC=4.74  含金量=2.59  毛利=78.3  FCF=4.185  
 MDLZ  ROE=15.34  ROIC=4.47  含金量=1.18  毛利=31.75  FCF=3.704  ✔
 OLN  ROE=21.3  ROIC=4.37  含金量=1.04  毛利=16.18  FCF=0.172  ✔
 MCRI  ROE=15.28  ROIC=4.2  含金量=2.04  毛利=22.1  FCF=0.105  ✔
+VATE  ROE=16.27  ROIC=3.77  含金量=4.31  毛利=19.29  FCF=-0.196  ✔
 BHR  ROE=19.02  ROIC=3.53  含金量=4.37  毛利=58.55  FCF=None  ✔
 CARG  ROE=23.06  ROIC=3.43  含金量=5.11  毛利=94.92  FCF=0.245  ✔
+WLFC  ROE=15.07  ROIC=3.38  含金量=1.73  毛利=89.96  FCF=0.171  ✔
+WOR  ROE=20.58  ROIC=1.52  含金量=2.56  毛利=25.87  FCF=0.476  ✔
 CREX  ROE=20.66  ROIC=0.45  含金量=1.53  毛利=47.0  FCF=0.004  ✔
-BBW  ROE=28.57  ROIC=None  含金量=1.35  毛利=54.89  FCF=0.049  ✔
-ATLCZ  ROE=17.99  ROIC=None  含金量=3.71  毛利=90.94  FCF=0.433  ✔
-DDS  ROE=35.68  ROIC=None  含金量=1.55  毛利=40.12  FCF=1.011  ✔
-NIHK  ROE=47.82  ROIC=None  含金量=1.51  毛利=57.05  FCF=None  ✔
 AETN  ROE=15.85  ROIC=None  含金量=1.03  毛利=59.38  FCF=None  ✔
-LLY  ROE=18.45  ROIC=None  含金量=1.23  毛利=79.96  FCF=None  
-ODRS  ROE=24.84  ROIC=None  含金量=0.99  毛利=91.24  FCF=None  ✔
-NUE  ROE=17.88  ROIC=None  含金量=1.17  毛利=20.05  FCF=1.995  
+ARHS  ROE=30.86  ROIC=None  含金量=1.35  毛利=41.49  FCF=0.08  ✔
+ATLC  ROE=17.99  ROIC=None  含金量=3.71  毛利=90.94  FCF=0.433  ✔
+ATLCL  ROE=17.99  ROIC=None  含金量=3.71  毛利=90.94  FCF=0.433  ✔
+ATLCP  ROE=17.99  ROIC=None  含金量=3.71  毛利=90.94  FCF=0.433  ✔
+ATLCZ  ROE=17.99  ROIC=None  含金量=3.71  毛利=90.94  FCF=0.433  ✔
+BBW  ROE=28.57  ROIC=None  含金量=1.35  毛利=54.89  FCF=0.049  ✔
+BL  ROE=15.71  ROIC=None  含金量=2.5  毛利=75.21  FCF=0.111  ✔
+COP  ROE=17.44  ROIC=None  含金量=1.92  毛利=54.97  FCF=15.784  ✔
+CRCT  ROE=24.06  ROIC=None  含金量=1.3  毛利=40.97  FCF=None  ✔
+CRVL  ROE=16.83  ROIC=None  含金量=1.83  毛利=22.02  FCF=0.094  ✔
+DDS  ROE=35.68  ROIC=None  含金量=1.55  毛利=40.12  FCF=1.011  ✔
+DDT  ROE=35.68  ROIC=None  含金量=1.55  毛利=40.12  FCF=1.011  ✔
+DOCS  ROE=15.52  ROIC=None  含金量=1.2  毛利=89.34  FCF=0.176  ✔
 ENR  ROE=22.63  ROIC=None  含金量=9.22  毛利=38.07  FCF=0.268  ✔
-PCAR  ROE=19.79  ROIC=None  含金量=0.9  毛利=22.8  FCF=2.89  ✔
+EXPD  ROE=34.47  ROIC=None  含金量=1.45  毛利=17.27  FCF=1.097  
+FTDR  ROE=75.65  ROIC=None  含金量=1.81  毛利=50.6  FCF=0.281  ✔
+FULO  ROE=55.05  ROIC=None  含金量=1.54  毛利=193.11  FCF=0.001  ✔
+GM  ROE=15.85  ROIC=None  含金量=1.45  毛利=29.4  FCF=5.712  ✔
 IBM  ROE=21.08  ROIC=None  含金量=2.24  毛利=55.84  FCF=14.496  
 KWIK  ROE=41.7  ROIC=None  含金量=1.47  毛利=53.11  FCF=None  ✔
-COP  ROE=17.44  ROIC=None  含金量=1.92  毛利=54.97  FCF=15.784  ✔
-BL  ROE=15.71  ROIC=None  含金量=2.5  毛利=75.21  FCF=0.111  ✔
-CRVL  ROE=16.83  ROIC=None  含金量=1.83  毛利=22.02  FCF=0.094  ✔
-ATLCL  ROE=17.99  ROIC=None  含金量=3.71  毛利=90.94  FCF=0.433  ✔
-PRI  ROE=23.67  ROIC=None  含金量=1.34  毛利=98.57  FCF=None  ✔
-CRCT  ROE=24.06  ROIC=None  含金量=1.3  毛利=40.97  FCF=None  ✔
-GM  ROE=15.85  ROIC=None  含金量=1.45  毛利=29.4  FCF=5.712  ✔
+LLY  ROE=18.45  ROIC=None  含金量=1.23  毛利=79.96  FCF=None  
+NIHK  ROE=47.82  ROIC=None  含金量=1.51  毛利=57.05  FCF=None  ✔
+NUE  ROE=17.88  ROIC=None  含金量=1.17  毛利=20.05  FCF=1.995  
 NVEC  ROE=25.86  ROIC=None  含金量=1.16  毛利=83.63  FCF=0.017  ✔
-EXPD  ROE=34.47  ROIC=None  含金量=1.45  毛利=17.27  FCF=1.097  
-ATLCP  ROE=17.99  ROIC=None  含金量=3.71  毛利=90.94  FCF=0.433  ✔
-PNYG  ROE=15.53  ROIC=None  含金量=1.47  毛利=42.69  FCF=None  ✔
-ARHS  ROE=30.86  ROIC=None  含金量=1.35  毛利=41.49  FCF=0.08  ✔
-DOCS  ROE=15.52  ROIC=None  含金量=1.2  毛利=89.34  FCF=0.176  ✔
-DDT  ROE=35.68  ROIC=None  含金量=1.55  毛利=40.12  FCF=1.011  ✔
-FULO  ROE=55.05  ROIC=None  含金量=1.54  毛利=193.11  FCF=0.001  ✔
-OSPN  ROE=20.19  ROIC=None  含金量=1.33  毛利=67.38  FCF=0.065  ✔
-FTDR  ROE=75.65  ROIC=None  含金量=1.81  毛利=50.6  FCF=0.281  ✔
-ATLC  ROE=17.99  ROIC=None  含金量=3.71  毛利=90.94  FCF=0.433  ✔
+ODRS  ROE=24.84  ROIC=None  含金量=0.99  毛利=91.24  FCF=None  ✔
 OPXS  ROE=18.58  ROIC=None  含金量=1.44  毛利=28.79  FCF=0.007  ✔
+OSPN  ROE=20.19  ROIC=None  含金量=1.33  毛利=67.38  FCF=0.065  ✔
+PCAR  ROE=19.79  ROIC=None  含金量=0.9  毛利=22.8  FCF=2.89  ✔
+PNYG  ROE=15.53  ROIC=None  含金量=1.47  毛利=42.69  FCF=None  ✔
+PRI  ROE=23.67  ROIC=None  含金量=1.34  毛利=98.57  FCF=None  ✔
+QLYS  ROE=27.97  ROIC=None  含金量=2.14  毛利=80.79  FCF=0.325  ✔
+RCMT  ROE=30.62  ROIC=None  含金量=1.82  毛利=27.98  FCF=0.023  ✔
+RES  ROE=16.39  ROIC=None  含金量=1.32  毛利=32.8  FCF=0.068  ✔
+RGR  ROE=17.26  ROIC=None  含金量=0.87  毛利=24.71  FCF=0.034  ✔
+RPM  ROE=16.97  ROIC=None  含金量=1.78  毛利=37.85  FCF=0.747  ✔
+TROW  ROE=15.82  ROIC=None  含金量=1.69  毛利=30.79  FCF=2.585  
+UTHR  ROE=16.95  ROIC=None  含金量=1.5  毛利=88.66  FCF=1.333  ✔
+WLSS  ROE=22.25  ROIC=None  含金量=0.98  毛利=100.0  FCF=None  ✔
+ZTS  ROE=72.6  ROIC=None  含金量=0.84  毛利=70.35  FCF=1.312  
+TDAY  ROE=34.98  ROIC=-6.93  含金量=1.71  毛利=36.67  FCF=0.039  ✔
 KLXE  ROE=61.08  ROIC=-8.29  含金量=1.08  毛利=23.1  FCF=-0.13  ✔
 BCRX  ROE=34.51  ROIC=-11.55  含金量=1.08  毛利=97.97  FCF=-0.207  ✔
+UONE  ROE=46.68  ROIC=-15.33  含金量=3.0  毛利=70.13  FCF=0.024  ✔
+UONEK  ROE=46.68  ROIC=-15.33  含金量=3.0  毛利=70.13  FCF=0.024  ✔
 GWLL  ROE=75.15  ROIC=-144.56  含金量=1.9  毛利=284.76  FCF=None  ✔
 KYNB  ROE=22.85  ROIC=-371.48  含金量=16.65  毛利=179.05  FCF=-0.169  ✔
+W  ROE=21.22  ROIC=-432.03  含金量=1.01  毛利=30.7  FCF=-0.7  ✔
 GROV  ROE=78.86  ROIC=-19767.04  含金量=4.04  毛利=53.08  FCF=-0.059  ✔
 GROVW  ROE=78.86  ROIC=-19767.04  含金量=4.04  毛利=53.08  FCF=-0.059  ✔

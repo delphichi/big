@@ -109,10 +109,18 @@ def diff(cur, prev):
     drop = [(s, prev.loc[s, "名稱"], prev.loc[s, "權重"]) for s in sa - sb]
     chg = []
     for s in sa & sb:
-        d = cur.loc[s, "股數"] - prev.loc[s, "股數"]
-        if d and prev.loc[s, "股數"]:
-            chg.append((s, cur.loc[s, "名稱"], d / prev.loc[s, "股數"] * 100, cur.loc[s, "權重"]))
-    chg.sort(key=lambda x: abs(x[2]), reverse=True)
+        p0 = prev.loc[s, "股數"]
+        d = cur.loc[s, "股數"] - p0
+        if not d or not p0:
+            continue
+        w0 = prev.loc[s, "權重"]
+        # 期初基數過小(權重<0.1% 或 股數極微)→ 視為「建倉」,不算百分比
+        # (否則 分母趨0 → +84344% 之類的爆表假訊號)
+        build = (pd.notna(w0) and w0 < 0.1) or p0 < 1000
+        pct = None if build else d / p0 * 100
+        chg.append((s, cur.loc[s, "名稱"], pct, cur.loc[s, "權重"], build))
+    # 建倉(pct=None)排最前,其餘按變動幅度大→小
+    chg.sort(key=lambda x: (1e9 if x[2] is None else abs(x[2])), reverse=True)
     return new, drop, chg
 
 
@@ -167,9 +175,13 @@ def diff_consensus(today):
             print(f"   🟢新增 {s} {n}"); buy.setdefault(s, []).append(fund["name"])
         for s, n, w in drop:
             print(f"   🔴剔除 {s} {n}"); sell.setdefault(s, []).append(fund["name"])
-        for s, n, pct, w in chg[:5]:
-            print(f"   {'⬆️加' if pct > 0 else '⬇️減'} {s} {n} {pct:+.0f}%")
-            (buy if pct > 0 else sell).setdefault(s, []).append(fund["name"])
+        for s, n, pct, w, build in chg[:5]:
+            if build:
+                print(f"   🆕建倉 {s} {n} (現權重{w}%)")
+                buy.setdefault(s, []).append(fund["name"])
+            else:
+                print(f"   {'⬆️加' if pct > 0 else '⬇️減'} {s} {n} {pct:+.0f}%")
+                (buy if pct > 0 else sell).setdefault(s, []).append(fund["name"])
         if not (new or drop or chg):
             print("   (無變化)")
         print()
@@ -202,8 +214,11 @@ def week_report():
         new, drop, chg = diff(b, a)
         if new: print("  🟢期間新進:", "、".join(f"{s}{n}" for s, n, w in new))
         if drop: print("  🔴期間剔除:", "、".join(f"{s}{n}" for s, n, w in drop))
-        for s, n, pct, w in [x for x in chg if abs(x[2]) >= 10][:8]:
-            print(f"   {'⬆️加' if pct > 0 else '⬇️減'} {s}{n} {pct:+.0f}% (現權重{w}%)")
+        for s, n, pct, w, build in [x for x in chg if x[2] is None or abs(x[2]) >= 10][:8]:
+            if build:
+                print(f"   🆕建倉 {s}{n} (現權重{w}%)")
+            else:
+                print(f"   {'⬆️加' if pct > 0 else '⬇️減'} {s}{n} {pct:+.0f}% (現權重{w}%)")
 
 
 def main():

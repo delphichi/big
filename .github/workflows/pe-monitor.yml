@@ -40,6 +40,10 @@ jobs:
           MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python pe_buyzone_monitor.py
 
+      - name: 追加每日訊號 log(時間序列,供日後回測推薦對錯)
+        if: always()
+        run: python append_signal_log.py || echo "訊號log失敗,繼續"
+
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v6
@@ -54,7 +58,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/PE買入區間監看.xlsx tickers_watch.txt || true
+          git add data/PE買入區間監看.xlsx data/daily_signal_log.csv tickers_watch.txt || true
           if git diff --staged --quiet; then
             echo "無變更,略過 commit"; exit 0
           fi

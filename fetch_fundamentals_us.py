@@ -102,11 +102,13 @@ def cagr(v, n):
 
 
 def is_cyclical(v):
+    """收緊:EPS曾為負 OR 多次大跌(>20%) — 單次大跌不算循環(NVDA/ADSK 等成長股偶有挫折)"""
     if len(v) < 3:
         return False
     if min(v) <= 0:
         return True
-    return any(v[i] < v[i-1] * 0.8 for i in range(1, len(v)))
+    drops = sum(1 for i in range(1, len(v)) if v[i] < v[i-1] * 0.8)
+    return drops >= 2
 
 
 def historical_pctl(values, current):
@@ -184,9 +186,13 @@ def fetch_one(sym):
     _roe = pick(ttm0, "returnOnEquityTTM", "roeTTM")
     _roic = pick(ttm0, "returnOnInvestedCapitalTTM", "roicTTM", "returnOnCapitalEmployedTTM")
     _peg = None              # stable 無 TTM PEG,留空(可未來自算 PER/EPS3y)
-    _dy = pick(prof0, "lastDividend", "dividendYield")  # profile 有 dividend
-    if _dy and price and _dy > 1:  # 若是絕對股息金額,換算殖利率
-        _dy = _dy / price
+    # 殖利率:優先用 ttm 的 dividendYieldTTM(分數);profile.lastDividend 是絕對金額會誤導
+    _dy = pick(ttm0, "dividendYieldTTM", "dividendYieldPercentageTTM", "dividendYieldRatioTTM")
+    if _dy is None:
+        _dy = pick(prof0, "dividendYield", "dividendYieldRatio")
+    # >1 表示已是 %;<=1 才是分數 → 統一存為「分數」,輸出再 × 100
+    if _dy is not None and _dy > 1:
+        _dy = _dy / 100
     # FMP stable 已從 key-metrics 移除 debtRatio 系列(只剩 netDebtToEBITDA),改從 ratios 端點補
     _debt = pick(ttm0, "debtToAssetsTTM", "totalDebtToAssetsTTM",
                        "debtRatioTTM", "totalDebtToTotalAssetsTTM")
@@ -213,7 +219,7 @@ def fetch_one(sym):
         "名稱": prof0.get("companyName", sym),
         "產業": prof0.get("sector", ""),
         "收盤": prof0.get("price"),
-        "市值(億美)": round(prof0.get("mktCap", 0) / 1e8, 1) if prof0.get("mktCap") else np.nan,
+        "市值(億美)": round((pick(prof0, "marketCap", "mktCap", "marketCapitalization") or 0) / 1e8, 1) if pick(prof0, "marketCap", "mktCap", "marketCapitalization") else np.nan,
         "營收CAGR%": round(cagr(rev, min(4, len(rev)-1)) * 100, 1) if len(rev) >= 2 else np.nan,
         "毛利率%": round(gp[-1] / rev_l * 100, 1) if gp and rev_l else np.nan,
         "營益率%": round(inc_a[-1].get("operatingIncomeRatio", 0) * 100, 1) if inc_a else np.nan,

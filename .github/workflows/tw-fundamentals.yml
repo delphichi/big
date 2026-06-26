@@ -17,7 +17,7 @@ permissions:
 jobs:
   tw-fundamentals:
     runs-on: ubuntu-latest
-    timeout-minutes: 35       # 腳本自身 30 分自停;此為硬上限,控 Actions 計費
+    timeout-minutes: 55       # 付費FinMind:腳本50分自停, 此為硬上限
 
     steps:
       - name: Checkout repo

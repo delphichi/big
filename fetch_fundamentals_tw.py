@@ -532,7 +532,11 @@ def load_cache(sid):
 def build_output(namemap):
     rows, hists, rev_years, eps_years, q_gms = [], [], {}, {}, {}
     done = 0
-    for sid in SCAN_LIST:
+    # 輸出 = SCAN_LIST ∪ 所有已快取(關鍵:PICKS-only run 也不可丟掉全市場已抓的檔)
+    cached_ids = ([f[:-5] for f in os.listdir(CACHE_DIR) if f.endswith(".json")]
+                  if os.path.isdir(CACHE_DIR) else [])
+    all_ids = list(dict.fromkeys(list(SCAN_LIST) + sorted(cached_ids)))   # 保序去重
+    for sid in all_ids:
         c = load_cache(sid)
         if not c:
             continue

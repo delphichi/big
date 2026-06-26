@@ -51,7 +51,7 @@ RATE_SLEEP = 0.4                          # 每檔間隔(降低撞限流機率)
 WRITE_DETAIL = False                      # 逐季明細會產生很多分頁,預設關;要看單檔細節再開
 # 付費 FinMind 無 600/hr 牆 → 拉長一輪多抓(早於 CI 55 分 timeout);免費版可設 TW_MAX_RUNTIME_MIN=30
 MAX_RUNTIME_MIN = int(os.environ.get("TW_MAX_RUNTIME_MIN", "50"))
-TW_WORKERS      = int(os.environ.get("TW_WORKERS", "8"))   # 平行抓取執行緒(付費額度高→吞吐3-5x;免費設1)
+TW_WORKERS      = int(os.environ.get("TW_WORKERS", "4"))   # 平行抓取執行緒(8太衝會秒爆額度;付費額度高可調大)
 RATE_WAIT_CAP   = 90                       # 撞額度時最多睡幾秒(不再睡到整點,避免燒分鐘)
 MAX_RATE_RETRY  = 2                        # 撞額度短重試次數,仍失敗就跳過此檔(下輪靠快取補)
 
@@ -670,23 +670,25 @@ def main():
     print(f"⚡ 平行抓取:{TW_WORKERS} 執行緒")
     done_n = 0
     stopped = False
-    with ThreadPoolExecutor(max_workers=TW_WORKERS) as ex:
-        futs = {ex.submit(fetch_and_cache, s): s for s in todo}
-        for fut in as_completed(futs):
+    ex = ThreadPoolExecutor(max_workers=TW_WORKERS)
+    futs = {ex.submit(fetch_and_cache, s): s for s in todo}
+    for fut in as_completed(futs):
+        try:
             sid, status = fut.result()
-            done_n += 1
-            if status not in ("ok", "rate"):
-                print(f"  ! {sid} {status}")
-            if done_n % 20 == 0:
-                print(f"  [{done_n}/{len(todo)}] 最新 {sid} {status}")
-            if done_n % 100 == 0:                      # 每 100 檔重建一次 Excel(分段保存)
-                build_output(namemap)
-            if not stopped and time.time() - t0 > MAX_RUNTIME_MIN * 60:
-                print(f"⏲ 已達 {MAX_RUNTIME_MIN} 分上限,停止提交、收尾未完成的(剩餘下輪續抓)")
-                stopped = True
-                for f, s in futs.items():
-                    if not f.done():
-                        f.cancel()                     # 取消尚未開始的;進行中的會自然結束
+        except Exception:
+            continue                                   # 被取消/例外的 future 略過(不讓 CancelledError 中斷整輪)
+        done_n += 1
+        if status not in ("ok", "rate"):
+            print(f"  ! {sid} {status}")
+        if done_n % 20 == 0:
+            print(f"  [{done_n}/{len(todo)}] 最新 {sid} {status}")
+        if done_n % 100 == 0:                          # 每 100 檔重建一次 Excel(分段保存)
+            build_output(namemap)
+        if time.time() - t0 > MAX_RUNTIME_MIN * 60:
+            print(f"⏲ 已達 {MAX_RUNTIME_MIN} 分上限,取消未開始的、收尾(剩餘下輪續抓)")
+            ex.shutdown(wait=False, cancel_futures=True)   # 取消 pending,進行中的自然結束
+            break
+    ex.shutdown(wait=True)                             # 等進行中的收尾(pending 已取消)
 
     n = build_output(namemap)                          # 收尾再出一版完整的
     print(f"\n完成 → {OUTPUT}({n}/{len(SCAN_LIST)} 檔)")

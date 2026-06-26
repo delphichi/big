@@ -187,13 +187,22 @@ def fetch_one(sym):
     _dy = pick(prof0, "lastDividend", "dividendYield")  # profile 有 dividend
     if _dy and price and _dy > 1:  # 若是絕對股息金額,換算殖利率
         _dy = _dy / price
+    # FMP stable 已從 key-metrics 移除 debtRatio 系列(只剩 netDebtToEBITDA),改從 ratios 端點補
     _debt = pick(ttm0, "debtToAssetsTTM", "totalDebtToAssetsTTM",
                        "debtRatioTTM", "totalDebtToTotalAssetsTTM")
-    # 退路:若 TTM 鍵名變動抓不到,從最新 annual key-metrics 取
     if _debt is None and km_a:
         latest_km = km_a[0]
         _debt = pick(latest_km, "debtToAssets", "totalDebtToAssets",
                                 "debtRatio", "totalDebtToTotalAssets")
+    # 主退路:ratios 端點(已抓但原本沒用)— 通常仍有 debtRatio/debtEquityRatio
+    if _debt is None and ratios:
+        _debt = pick(ratios[-1], "debtRatio", "debtToAssetsRatio",
+                                  "totalDebtToAssets", "totalDebtToTotalAssets")
+        # 若只有 D/E,粗略轉成 D/A:D/A = D/E / (1 + D/E)
+        if _debt is None:
+            de = pick(ratios[-1], "debtEquityRatio", "debtToEquityRatio")
+            if de is not None and de > 0:
+                _debt = de / (1 + de)
 
     rev_l = rev[-1] if rev else None
     ni_l  = ni[-1] if ni else None
@@ -355,10 +364,13 @@ def main():
                 _km = get("key-metrics", symbol=sym, period="annual", limit=1)
                 ttm_keys = list((_t[0] if _t else {}).keys())
                 km_keys  = list((_km[0] if _km else {}).keys())
+                ratios_keys = list((_r[-1] if _r else {}).keys())
                 debt_ttm = [k for k in ttm_keys if "debt" in k.lower() or "leverage" in k.lower()]
                 debt_km  = [k for k in km_keys  if "debt" in k.lower() or "leverage" in k.lower()]
+                debt_rt  = [k for k in ratios_keys if "debt" in k.lower() or "leverage" in k.lower() or "equity" in k.lower()]
                 print(f"DEBUG {sym} ttm debt keys:", debt_ttm)
                 print(f"DEBUG {sym} km annual debt keys:", debt_km)
+                print(f"DEBUG {sym} ratios debt/equity keys:", debt_rt)
                 debug_done = True
             r = fetch_one(sym)
             v_eps = r.pop("_eps_series")

@@ -37,6 +37,7 @@
 """
 
 import os, time, json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
@@ -50,6 +51,7 @@ RATE_SLEEP = 0.4                          # 每檔間隔(降低撞限流機率)
 WRITE_DETAIL = False                      # 逐季明細會產生很多分頁,預設關;要看單檔細節再開
 # 付費 FinMind 無 600/hr 牆 → 拉長一輪多抓(早於 CI 55 分 timeout);免費版可設 TW_MAX_RUNTIME_MIN=30
 MAX_RUNTIME_MIN = int(os.environ.get("TW_MAX_RUNTIME_MIN", "50"))
+TW_WORKERS      = int(os.environ.get("TW_WORKERS", "8"))   # 平行抓取執行緒(付費額度高→吞吐3-5x;免費設1)
 RATE_WAIT_CAP   = 90                       # 撞額度時最多睡幾秒(不再睡到整點,避免燒分鐘)
 MAX_RATE_RETRY  = 2                        # 撞額度短重試次數,仍失敗就跳過此檔(下輪靠快取補)
 
@@ -638,40 +640,53 @@ def main():
     print(f"總 {len(SCAN_LIST)} 檔,已完成 {len(SCAN_LIST)-len(todo)} 檔,待抓 {len(todo)} 檔")
     build_output(namemap)                              # 先用既有快取出一版(確保隨時有進度檔)
 
-    for i, sid in enumerate(todo, 1):
-        if time.time() - t0 > MAX_RUNTIME_MIN * 60:     # 整輪超時 → 存檔退出,下輪靠快取續抓
-            print(f"⏲ 已達 {MAX_RUNTIME_MIN} 分上限,本輪先收尾(剩 {len(todo)-i+1} 檔下輪續抓)")
-            break
+    def fetch_and_cache(sid):
+        """單檔:抓+算+存快取。回傳 (sid, 狀態字串)。撞額度退避重試;真失敗寫空快取。"""
         name = namemap.get(sid, sid)
-        print(f"[{i}/{len(todo)}] 抓取 {sid} {name} ...")
         tries = 0
         while True:
             try:
                 raw = fetch_one(dl, sid, START_DATE)
                 row, perf, rev_y, eps_y, hist = summary_row(sid, name, raw)
-                if sid in FINANCIALS:                  # 金融股標記
+                if sid in FINANCIALS:
                     row["金融"] = "🏦"; hist["金融"] = "🏦"
-                q3 = {}                                # 逐季毛利率(近8季,供拐點掃描算毛利拐頭)
+                q3 = {}
                 if not perf.empty and "毛利率%" in perf.columns:
                     qm = perf["毛利率%"].dropna().tail(8)
                     q3 = {str(d)[:10]: round(float(x), 2) for d, x in qm.items()}
                 save_cache(sid, {"row": row, "hist": hist,
-                                 "rev_year": rev_y, "eps_year": eps_y, "q_gm": q3})  # 立刻存,續跑用
-                break
+                                 "rev_year": rev_y, "eps_year": eps_y, "q_gm": q3})
+                return sid, "ok"
             except Exception as e:
                 if _is_rate_limit(e) and tries < MAX_RATE_RETRY:
                     tries += 1
-                    print(f"  ⏸ 疑似額度用罄 → 睡 {RATE_WAIT_CAP}s 短重試({tries}/{MAX_RATE_RETRY})")
                     time.sleep(RATE_WAIT_CAP); continue
-                if _is_rate_limit(e):                  # 重試仍撞額度 → 跳過(不寫快取,下輪會再抓)
-                    print(f"  ↷ {sid} 額度未恢復,本輪跳過(下輪靠快取補)")
-                    break
-                print(f"  ! {sid} 失敗:{e}")           # 真失敗(非額度)才寫空快取,避免一直重試壞票
+                if _is_rate_limit(e):
+                    return sid, "rate"                 # 跳過(不寫快取,下輪再抓)
                 save_cache(sid, {"row": {"代號": sid, "名稱": name}, "hist": {"代號": sid, "名稱": name}})
-                break
-        if i % 10 == 0:                                # 每 10 檔重建一次 Excel(分段保存進度)
-            build_output(namemap)
-        time.sleep(RATE_SLEEP)
+                return sid, f"fail:{str(e)[:40]}"
+
+    # 平行抓取(付費額度高→TW_WORKERS 條執行緒;免費設 TW_WORKERS=1 等同序列)
+    print(f"⚡ 平行抓取:{TW_WORKERS} 執行緒")
+    done_n = 0
+    stopped = False
+    with ThreadPoolExecutor(max_workers=TW_WORKERS) as ex:
+        futs = {ex.submit(fetch_and_cache, s): s for s in todo}
+        for fut in as_completed(futs):
+            sid, status = fut.result()
+            done_n += 1
+            if status not in ("ok", "rate"):
+                print(f"  ! {sid} {status}")
+            if done_n % 20 == 0:
+                print(f"  [{done_n}/{len(todo)}] 最新 {sid} {status}")
+            if done_n % 100 == 0:                      # 每 100 檔重建一次 Excel(分段保存)
+                build_output(namemap)
+            if not stopped and time.time() - t0 > MAX_RUNTIME_MIN * 60:
+                print(f"⏲ 已達 {MAX_RUNTIME_MIN} 分上限,停止提交、收尾未完成的(剩餘下輪續抓)")
+                stopped = True
+                for f, s in futs.items():
+                    if not f.done():
+                        f.cancel()                     # 取消尚未開始的;進行中的會自然結束
 
     n = build_output(namemap)                          # 收尾再出一版完整的
     print(f"\n完成 → {OUTPUT}({n}/{len(SCAN_LIST)} 檔)")

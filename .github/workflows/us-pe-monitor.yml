@@ -1,4 +1,4 @@
-name: 美股PE PEG F/PE 監看表
+name: 美股PE PEG F/PE 監看表 + Email
 
 on:
   workflow_dispatch:
@@ -8,8 +8,9 @@ on:
         required: false
         default: ""
   schedule:
-    # 每週一三五 美股盤後 07:00 UTC (= 台北 15:00 / 美東收盤後 ~2hr)
-    - cron: "0 7 * * 1,3,5"
+    # 每週二~六 美股盤後 07:00 UTC (= 台北 15:00 / 美東 03:00,前一日美股已收盤)
+    # 美股週一收 → 台北週二 15:00 跑;週五收 → 台北週六 15:00 跑
+    - cron: "0 7 * * 2,3,4,5,6"
 
 permissions:
   contents: write
@@ -31,6 +32,28 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           WATCHLIST: ${{ inputs.watchlist }}
         run: python us_pe_monitor.py
+
+      - name: 產生 email 摘要
+        id: email_prep
+        run: |
+          python us_pe_monitor_email.py
+          echo "subject=$(cat /tmp/email_subject.txt)" >> $GITHUB_OUTPUT
+
+      - name: 寄 email
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: ${{ steps.email_prep.outputs.subject }}
+          html_body: file:///tmp/email_body.html
+          to: delphichi@gmail.com
+          from: 美股監看 <${{ secrets.GMAIL_USER }}>
+          attachments: data/美股PE監看表.xlsx
+          convert_markdown: false
 
       - name: Commit
         if: always()

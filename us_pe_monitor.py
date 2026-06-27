@@ -54,20 +54,40 @@ def get(endpoint, **params):
 
 
 def fetch_quote(sym):
-    """抓即時報價 + 分析師預估明年 EPS"""
+    """抓即時報價 + 當前 PE(TTM)+ 分析師預估明年 EPS → Forward PE"""
     try:
         q = get("quote", symbol=sym)
         if not q: return sym, None, None, None
         q0 = q[0] if isinstance(q, list) else q
         price = q0.get("price")
-        pe_curr = q0.get("pe")  # FMP 提供當前 PE(TTM)
+        pe_curr = q0.get("pe")
 
-        est = get("analyst-estimates", symbol=sym, period="annual", limit=2)
+        # quote 的 pe 常為 null → 用 ratios-ttm 備援
+        if pe_curr is None or pe_curr == 0:
+            rt = get("ratios-ttm", symbol=sym)
+            if isinstance(rt, list) and rt:
+                rt0 = rt[0]
+                pe_curr = rt0.get("peRatioTTM") or rt0.get("priceToEarningsRatioTTM")
+            elif isinstance(rt, dict):
+                pe_curr = rt.get("peRatioTTM") or rt.get("priceToEarningsRatioTTM")
+
+        # 再備援:用 price / TTM EPS 自己算
+        if (pe_curr is None or pe_curr == 0) and price:
+            km = get("key-metrics-ttm", symbol=sym)
+            km0 = (km[0] if isinstance(km, list) and km else km) or {}
+            eps_ttm = km0.get("netIncomePerShareTTM") or km0.get("epsTTM")
+            if eps_ttm and eps_ttm > 0:
+                pe_curr = round(price / eps_ttm, 1)
+
+        if pe_curr is not None:
+            pe_curr = round(float(pe_curr), 1)
+
+        # Forward PE:用分析師未來一年 EPS 預估
+        est = get("analyst-estimates", symbol=sym, period="annual", limit=3)
         eps_next = None
         if isinstance(est, list) and est:
-            # 取最近未來一年的 EPS 估值
             for e in est:
-                v = e.get("estimatedEpsAvg") or e.get("epsAvg")
+                v = e.get("estimatedEpsAvg") or e.get("epsAvg") or e.get("estimatedEps")
                 if v and v > 0:
                     eps_next = v
                     break

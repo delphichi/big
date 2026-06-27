@@ -33,6 +33,12 @@ jobs:
           WATCHLIST: ${{ inputs.watchlist }}
         run: python us_pe_monitor.py
 
+      - name: 推薦追蹤(record + evaluate + report)
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: python pick_tracker.py
+
       - name: 產生 email 摘要
         id: email_prep
         run: |
@@ -60,7 +66,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/美股PE監看表.xlsx || true
+          git add data/美股PE監看表.xlsx data/推薦追蹤.csv data/推薦戰績.xlsx || true
           if git diff --staged --quiet; then echo "無變更"; exit 0; fi
           git commit -m "data: 美股PE監看表更新"
           for i in 1 2 3 4 5; do

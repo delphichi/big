@@ -1,0 +1,69 @@
+name: 台股PE PEG F/PE 監看表 + Email
+
+on:
+  workflow_dispatch:
+    inputs:
+      watchlist:
+        description: "自訂監看清單 (逗號分隔,空白用內建 97 檔)"
+        required: false
+        default: ""
+  schedule:
+    # 台北每個交易日 14:00 (UTC 06:00),台股 13:30 收盤後 30 分
+    - cron: "0 6 * * 1,2,3,4,5"
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install requests pandas openpyxl
+
+      - name: 跑 PE/PEG 監看
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          WATCHLIST: ${{ inputs.watchlist }}
+        run: python tw_pe_monitor.py
+
+      - name: 產生 email 摘要
+        id: email_prep
+        run: |
+          python tw_pe_monitor_email.py
+          echo "subject=$(cat /tmp/tw_email_subject.txt)" >> $GITHUB_OUTPUT
+
+      - name: 寄 email
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: ${{ steps.email_prep.outputs.subject }}
+          html_body: file:///tmp/tw_email_body.html
+          to: delphichi@gmail.com
+          from: 台股監看 <${{ secrets.GMAIL_USER }}>
+          attachments: data/台股PE監看表.xlsx
+          convert_markdown: false
+
+      - name: Commit
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/台股PE監看表.xlsx || true
+          if git diff --staged --quiet; then echo "無變更"; exit 0; fi
+          git commit -m "data: 台股PE監看表更新"
+          for i in 1 2 3 4 5; do
+            git fetch origin main -q && git merge origin/main -X ours --no-edit >/dev/null 2>&1
+            git push && { echo pushed; exit 0; }
+            sleep 6
+          done

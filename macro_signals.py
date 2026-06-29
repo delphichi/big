@@ -162,26 +162,46 @@ def signal_aud():
 
 
 def signal_tw_export():
-    """📱 台灣月出口 YoY% — 試多個 FRED series + 財政部 OpenData"""
-    # 多個 FRED series 嘗試(注意:FRED 的台灣資料常變動)
-    for sid in ["XTEXVA01TWM659S", "XTEXVA01TWM667S", "TWNEXP", "XTEXVA01TWQ659S"]:
+    """📱 台灣月出口 YoY% — 多源 fallback(FRED + OECD + 財政部)"""
+    # 先試 FRED(最快,有就直接用)
+    for sid in ["XTEXVA01TWM659S", "XTEXVA01TWM667S", "TWNEXP"]:
         df = fred(sid, days=900)
         if df is not None and len(df) >= 13:
-            cur = df.iloc[-1]["value"]
-            yr = df.iloc[-13]["value"]
-            yoy = (cur/yr - 1) * 100
-            date = df.iloc[-1]["date"].strftime("%Y-%m")
-            return {"當月": round(cur, 0), "YoY%": round(yoy, 1),
-                    "資料月": date, "FRED series": sid,
-                    "判讀": "🟢🟢 AI 強(>20%)" if yoy>20 else "🟢 健康" if yoy>5 else "🟠 弱"}
-    # 備援:財政部 OpenData(出口貿易值,月)
+            cur = df.iloc[-1]["value"]; yr = df.iloc[-13]["value"]
+            if yr and yr > 0:
+                yoy = (cur/yr - 1) * 100
+                date = df.iloc[-1]["date"].strftime("%Y-%m")
+                return {"當月": round(cur, 0), "YoY%": round(yoy, 1),
+                        "資料月": date, "源": f"FRED {sid}",
+                        "判讀": "🟢🟢 AI 強(>20%)" if yoy>20 else "🟢 健康" if yoy>5 else "🟠 弱"}
+
+    # 備援 1:OECD SDMX-JSON(只給指數,但穩定)
     try:
-        r = requests.get("https://web02.mof.gov.tw/njswww/webproxy.aspx?sym=2200000000000022070&run=Y", timeout=15)
-        # 財政部需特殊解析,簡單版只回提示
-        return {"狀態":"⚠️ FRED 序號失效,建議手動查 https://web02.mof.gov.tw/njswww/WebMain.aspx 或我寫專門 parser"}
+        url = "https://stats.oecd.org/SDMX-JSON/data/MEI_TRD/TWN.XTEXVA01.IXOBSA.M/all"
+        r = requests.get(url, params={"dimensionAtObservation":"allDimensions"},
+                         timeout=15, headers={"Accept":"application/json"})
+        if r.status_code == 200:
+            j = r.json()
+            obs = j.get("dataSets", [{}])[0].get("observations", {})
+            time_dim = j.get("structure", {}).get("dimensions", {}).get("observation", [])
+            time_idx = next((i for i, d in enumerate(time_dim) if d.get("id")=="TIME_PERIOD"), -1)
+            if time_idx >= 0 and obs:
+                times = time_dim[time_idx].get("values", [])
+                # 排序找最新 12 個月
+                sorted_keys = sorted(obs.keys(), key=lambda k: int(k.split(":")[time_idx]))
+                if len(sorted_keys) >= 13:
+                    cur_val = obs[sorted_keys[-1]][0]
+                    yr_val = obs[sorted_keys[-13]][0]
+                    yoy = (cur_val/yr_val - 1) * 100 if yr_val else None
+                    cur_t = times[int(sorted_keys[-1].split(":")[time_idx])].get("id","")
+                    if yoy is not None:
+                        return {"當月指數": round(cur_val, 1), "YoY%": round(yoy, 1),
+                                "資料月": cur_t, "源": "OECD MEI_TRD",
+                                "判讀": "🟢🟢 AI 強(>20%)" if yoy>20 else "🟢 健康" if yoy>5 else "🟠 弱"}
     except Exception:
         pass
-    return {"狀態":"❌ 無資料(可手動查財政部)"}
+
+    return {"狀態":"❌ FRED+OECD 都失敗,手動查 https://web02.mof.gov.tw/njswww/WebMain.aspx"}
 
 
 def signal_sox():

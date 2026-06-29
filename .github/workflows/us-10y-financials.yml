@@ -1,7 +1,13 @@
-name: 美股64檔10年財務數據
+name: 美股10年財務數據
 
 on:
   workflow_dispatch:
+    inputs:
+      tickers:
+        description: "代號清單(空白或逗號分隔, 留空 = 用 data/watchlist_us.txt)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -9,7 +15,7 @@ permissions:
 jobs:
   financials:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,6 +27,7 @@ jobs:
       - name: 抓 10 年三大報表
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          TICKERS: ${{ inputs.tickers }}
         run: python us_10y_financials.py
 
       - name: Commit
@@ -28,9 +35,9 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/美股64檔_10年財務.xlsx || true
+          git add data/美股_10年財務.xlsx || true
           if git diff --staged --quiet; then echo "無變更"; exit 0; fi
-          git commit -m "data: 美股64檔10年財務更新"
+          git commit -m "data: 美股10年財務更新"
           for i in 1 2 3 4 5; do
             git fetch origin main -q && git merge origin/main -X ours --no-edit >/dev/null 2>&1
             git push && { echo pushed; exit 0; }

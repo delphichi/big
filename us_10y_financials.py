@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-美股 64 檔 10 年財務數據 us_10y_financials.py
+美股 N 檔 10 年財務數據 us_10y_financials.py
 =======================================================================
 從 FMP 抓 watchlist 每檔近 10 年的:
   - 營收 revenue
@@ -10,7 +10,12 @@
   - 庫存 inventory
   - 負債比(總負債/總資產)
 
-輸出 data/美股64檔_10年財務.xlsx,8 個分頁:
+Watchlist 來源(優先順序):
+  1. 環境變數 TICKERS(空白/逗號/換行分隔), 適用 workflow_dispatch 手動輸入
+  2. data/watchlist_us.txt(一行一檔, # 開頭忽略)
+  3. 內建 fallback
+
+輸出 data/美股_10年財務.xlsx, 8 個分頁:
   - 概覽(每檔最新年 + 10y CAGR)
   - 6 個指標各一個橫向 10 年表
   - 各檔評等/品質(merge 自體檢總表)
@@ -23,19 +28,33 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 KEY = os.environ.get("FMP_API_KEY", "")
 BASE = "https://financialmodelingprep.com/stable"
-DST = "data/美股64檔_10年財務.xlsx"
+DST = "data/美股_10年財務.xlsx"
+WATCHLIST_FILE = "data/watchlist_us.txt"
 WORKERS = int(os.environ.get("WORKERS", "6"))
 
-# 同 us_pe_monitor.py 的 watchlist
-WATCH = """
-NVDA NVMI ANET KLAC AVGO FTNT ASML TSM LLY BRK-B MSFT META NFLX
-WPM AXP AMZN CDNS CAT HWM AAPL APH GLW GOOG EXEL
-HG CCEP CF AER LIN AMG COST ECL WMT FSLR IDCC NBIX
-CLS LRCX AMD MU MRVL LITE AMAT CIEN COHR WDC VRT PLTR
-CRM ADBE INTU NOW
-GE MCO SPGI CP FER CNI
-MA ORCL CHKP IDXX PAC
-""".split()
+
+def load_watchlist():
+    """讀 watchlist:TICKERS env → watchlist_us.txt → fallback"""
+    env = os.environ.get("TICKERS", "").strip()
+    if env:
+        toks = [t.strip().upper() for t in env.replace(",", " ").split() if t.strip()]
+        toks = [t for t in toks if t and not t.startswith("#")]
+        if toks:
+            print(f"  watchlist 來源: 環境變數 TICKERS ({len(toks)} 檔)")
+            return list(dict.fromkeys(toks))
+    if os.path.exists(WATCHLIST_FILE):
+        toks = []
+        with open(WATCHLIST_FILE, encoding="utf-8") as f:
+            for line in f:
+                line = line.split("#", 1)[0].strip()
+                if not line: continue
+                toks.extend(t.strip().upper() for t in line.split() if t.strip())
+        if toks:
+            print(f"  watchlist 來源: {WATCHLIST_FILE} ({len(toks)} 檔)")
+            return list(dict.fromkeys(toks))
+    fb = "NVDA AVGO TSM META GOOG MSFT".split()
+    print(f"  watchlist 來源: 內建 fallback ({len(fb)} 檔)")
+    return fb
 
 
 def get(endpoint, **params):
@@ -97,7 +116,7 @@ def to_billions(v):
 
 def main():
     if not KEY: print("⚠️ 未設 FMP_API_KEY"); return
-    codes = list(dict.fromkeys(WATCH))
+    codes = load_watchlist()
     print(f"抓 {len(codes)} 檔 10 年財務(平行 {WORKERS})")
 
     results = {}

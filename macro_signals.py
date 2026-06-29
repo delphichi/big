@@ -294,15 +294,9 @@ def signal_tw_gdp():
 
 
 def signal_move():
-    """🌀 MOVE 債市波動指數 — FMP 不支援,改用 TLT 30天波動率代理"""
-    # TLT = 20+ Year Treasury Bond ETF,其30日 implied vol 跟 MOVE 高度相關
-    for sym in ["^MOVE", "MOVE", "MOVEINDX"]:
-        fmp_q = fmp_quote(sym)
-        if fmp_q and float(fmp_q.get("price", 0)) > 0:
-            price = float(fmp_q["price"])
-            return {"MOVE": round(price, 2),
-                    "判讀": "🔴 債市恐慌(>130)" if price>130 else "🟡 警戒(100-130)" if price>100 else "🟢 平靜(<100)"}
-    # 備援:TLT 近 30 日波動率(粗略代理)
+    """🌀 MOVE 債市波動指數 — 直接用 TLT 30 日波動率代理
+    (ICE MOVE 無公開免費 API,FMP 的 ^MOVE 不是真實 MOVE 指數)"""
+    # FMP 上 ^MOVE 不是真實 ICE MOVE,直接走 TLT 代理
     today = datetime.now(timezone.utc).date()
     start = (today - timedelta(days=60)).isoformat()
     hist = fmp("historical-price-eod/full", symbol="TLT", **{"from": start, "to": today.isoformat()})

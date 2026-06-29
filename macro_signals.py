@@ -109,20 +109,20 @@ def signal_gold():
 
 
 def signal_oil():
-    """🛢️ WTI 原油 + Cushing 庫存"""
-    # FRED WTI 現貨
+    """🛢️ WTI 原油 + Cushing 庫存(以 FRED 為主源,FMP 可能是不同合約)"""
     df = fred("DCOILWTICO", days=400)
     price = None; src = []
     if df is not None and len(df):
         p = float(df.iloc[-1]["value"])
         src.append(("FRED", p))
-    fmp_q = fmp_quote("CLUSD") or fmp_quote("CL")
+        price = p  # FRED 是現貨,優先
+    fmp_q = fmp_quote("USOIL") or fmp_quote("CLUSD")
     if fmp_q:
         p_fmp = float(fmp_q.get("price", 0)) or None
         if p_fmp: src.append(("FMP", p_fmp))
     if not src: return {"狀態":"❌ 無資料"}
-    prices = [p for _, p in src]
-    price = sum(prices) / len(prices)
+    # 不取平均(FMP 可能是遠月合約)— 以 FRED 現貨為準
+    if price is None: price = src[0][1]
 
     # Cushing 庫存(EIA)— 週度
     cushing = None
@@ -162,33 +162,41 @@ def signal_aud():
 
 
 def signal_tw_export():
-    """📱 台灣月出口 YoY% — 用 FRED proxy (USD value) 因財政部 API 較難整合"""
-    # FRED 台灣出口 (USD millions, 月)
-    df = fred("XTEXVA01TWM664S", days=900)  # 台灣出口商品總值
-    if df is None or len(df) < 13:
-        # 備援:FRED 簡化版
-        df = fred("TWNXR", days=900)
-    if df is None or len(df) < 13: return {"狀態":"❌ 無資料(可手動查財政部)"}
-    cur = df.iloc[-1]["value"]
-    yr = df.iloc[-13]["value"] if len(df) >= 13 else None
-    yoy = (cur/yr - 1) * 100 if yr else None
-    date = df.iloc[-1]["date"].strftime("%Y-%m")
-    return {"當月": round(cur, 0), "YoY%": round(yoy, 1) if yoy else None,
-            "資料月": date,
-            "判讀": "🟢🟢 AI 強(>20%)" if yoy and yoy>20 else "🟢 健康" if yoy and yoy>5 else "🟠 弱"}
+    """📱 台灣月出口 YoY% — 試多個 FRED series + 財政部 OpenData"""
+    # 多個 FRED series 嘗試(注意:FRED 的台灣資料常變動)
+    for sid in ["XTEXVA01TWM659S", "XTEXVA01TWM667S", "TWNEXP", "XTEXVA01TWQ659S"]:
+        df = fred(sid, days=900)
+        if df is not None and len(df) >= 13:
+            cur = df.iloc[-1]["value"]
+            yr = df.iloc[-13]["value"]
+            yoy = (cur/yr - 1) * 100
+            date = df.iloc[-1]["date"].strftime("%Y-%m")
+            return {"當月": round(cur, 0), "YoY%": round(yoy, 1),
+                    "資料月": date, "FRED series": sid,
+                    "判讀": "🟢🟢 AI 強(>20%)" if yoy>20 else "🟢 健康" if yoy>5 else "🟠 弱"}
+    # 備援:財政部 OpenData(出口貿易值,月)
+    try:
+        r = requests.get("https://web02.mof.gov.tw/njswww/webproxy.aspx?sym=2200000000000022070&run=Y", timeout=15)
+        # 財政部需特殊解析,簡單版只回提示
+        return {"狀態":"⚠️ FRED 序號失效,建議手動查 https://web02.mof.gov.tw/njswww/WebMain.aspx 或我寫專門 parser"}
+    except Exception:
+        pass
+    return {"狀態":"❌ 無資料(可手動查財政部)"}
 
 
 def signal_sox():
-    """🔥 半導體 SOX 指數"""
-    fmp_q = fmp_quote("^SOX")
-    if not fmp_q: return {"狀態":"❌ 無資料"}
-    price = float(fmp_q.get("price", 0))
-    hi52 = float(fmp_q.get("yearHigh", price))
-    lo52 = float(fmp_q.get("yearLow", price))
-    pct = (price/hi52 - 1) * 100
-    return {"SOX": round(price, 2), "52週高": round(hi52,2),
-            "距高%": round(pct, 1),
-            "判讀": "🔴 新高過熱" if pct>-3 else "🟢 健康" if pct>-15 else "🟠 修正中"}
+    """🔥 半導體 SOX 指數 — FMP ^SOX 不穩,改用 SOXX ETF 代理"""
+    # SOXX 是 iShares Semiconductor ETF,跟 SOX 指數高度相關
+    for sym in ["SOXX", "SMH", "^SOX"]:
+        fmp_q = fmp_quote(sym)
+        if fmp_q and float(fmp_q.get("price", 0)) > 0:
+            price = float(fmp_q["price"])
+            hi52 = float(fmp_q.get("yearHigh", price))
+            pct = (price/hi52 - 1) * 100
+            return {f"{sym}": round(price, 2), "52週高": round(hi52, 2),
+                    "距高%": round(pct, 1),
+                    "判讀": "🔴 新高過熱" if pct>-3 else "🟢 健康" if pct>-15 else "🟠 修正中"}
+    return {"狀態":"❌ 無資料"}
 
 
 def signal_vix():
@@ -253,8 +261,11 @@ def signal_recession_prob():
 
 def signal_oecd_cli():
     """🌐 OECD 全球景氣領先指標(>100=擴張)"""
-    df = fred("OECDLOLITOAASTSAM", days=400)
-    if df is None or len(df) == 0: return {"狀態":"❌ 無資料"}
+    # 試多個 FRED OECD CLI series
+    for sid in ["OECDLOLITOAASTSAM", "USALOLITONOSTSAM", "OECDLOLITONOSTSAM"]:
+        df = fred(sid, days=400)
+        if df is not None and len(df) > 0: break
+    if df is None or len(df) == 0: return {"狀態":"❌ 無資料(FRED OECD series 變動)"}
     cur = float(df.iloc[-1]["value"])
     mo_ago = float(df.iloc[-2]["value"]) if len(df) >= 2 else None
     chg = cur - mo_ago if mo_ago else None
@@ -268,25 +279,42 @@ def signal_oecd_cli():
 
 
 def signal_tw_gdp():
-    """🇹🇼 台灣 GDP YoY"""
-    df = fred("NGDPRSAXDCTWQ", days=900)  # 台灣 GDP 季 (LCU)
-    if df is None or len(df) < 5: return {"狀態":"❌ 無資料(可改抓主計總處)"}
-    cur = df.iloc[-1]["value"]
-    yr = df.iloc[-5]["value"]
-    yoy = (cur/yr - 1) * 100
-    date = df.iloc[-1]["date"].strftime("%Y-Q%q")
-    return {"GDP YoY%": round(yoy, 2), "資料季": date,
-            "判讀": "🟢 強(>5%)" if yoy>5 else "🟡 中性(2-5%)" if yoy>2 else "🔴 弱"}
+    """🇹🇼 台灣 GDP YoY — 多 series 嘗試"""
+    for sid in ["NGDPRSAXDCTWQ", "TWNRGDPEXP", "NYGDPMKTPSACDTW",
+                "MKTGDPTWA646NWDB", "NAEXKP01TWQ659S"]:
+        df = fred(sid, days=900)
+        if df is None or len(df) < 5: continue
+        cur = df.iloc[-1]["value"]; yr = df.iloc[-5]["value"]
+        if not yr or yr == 0: continue
+        yoy = (cur/yr - 1) * 100
+        date = df.iloc[-1]["date"].strftime("%Y-Q%q")
+        return {"GDP YoY%": round(yoy, 2), "資料季": date, "FRED series": sid,
+                "判讀": "🟢 強(>5%)" if yoy>5 else "🟡 中性(2-5%)" if yoy>2 else "🔴 弱"}
+    return {"狀態":"❌ 無資料(可改抓主計總處 stat.gov.tw)"}
 
 
 def signal_move():
-    """🌀 MOVE 債市波動指數"""
-    fmp_q = fmp_quote("^MOVE")
-    if not fmp_q: return {"狀態":"⚠️ FMP 可能不支援 ^MOVE,改抓 ICE 官網"}
-    price = float(fmp_q.get("price", 0))
-    if price == 0: return {"狀態":"❌ 無資料"}
-    return {"MOVE": round(price, 2),
-            "判讀": "🔴 債市恐慌(>130)" if price>130 else "🟡 警戒(100-130)" if price>100 else "🟢 平靜(<100)"}
+    """🌀 MOVE 債市波動指數 — FMP 不支援,改用 TLT 30天波動率代理"""
+    # TLT = 20+ Year Treasury Bond ETF,其30日 implied vol 跟 MOVE 高度相關
+    for sym in ["^MOVE", "MOVE", "MOVEINDX"]:
+        fmp_q = fmp_quote(sym)
+        if fmp_q and float(fmp_q.get("price", 0)) > 0:
+            price = float(fmp_q["price"])
+            return {"MOVE": round(price, 2),
+                    "判讀": "🔴 債市恐慌(>130)" if price>130 else "🟡 警戒(100-130)" if price>100 else "🟢 平靜(<100)"}
+    # 備援:TLT 近 30 日波動率(粗略代理)
+    today = datetime.now(timezone.utc).date()
+    start = (today - timedelta(days=60)).isoformat()
+    hist = fmp("historical-price-eod/full", symbol="TLT", **{"from": start, "to": today.isoformat()})
+    if hist:
+        h = hist.get("historical") if isinstance(hist, dict) else hist
+        if h and len(h) >= 30:
+            df = pd.DataFrame(h).sort_values("date").tail(30)
+            ret = df["close"].pct_change().dropna()
+            vol = ret.std() * (252 ** 0.5) * 100  # 年化波動率%
+            return {"TLT 30日年化波動%": round(vol, 1), "註": "MOVE 代理",
+                    "判讀": "🔴 債市恐慌(>15%)" if vol>15 else "🟡 警戒(10-15%)" if vol>10 else "🟢 平靜(<10%)"}
+    return {"狀態":"❌ MOVE 與 TLT 都抓不到"}
 
 
 def signal_csp_capex():
@@ -311,16 +339,28 @@ def signal_csp_capex():
 
 
 def signal_fed_watch():
-    """🏛️ FedWatch 年底利率預期(從 Fed Fund Futures 反推)"""
-    # 簡化版:用 30-Day Fed Funds Futures(ZQ)隱含利率
-    # FMP 提供 期貨報價,複雜計算這裡簡化為「12 月 ZQ 隱含利率」
-    fmp_q = fmp_quote("ZQZ25.CME") or fmp_quote("ZQ")
-    if not fmp_q: return {"狀態":"⚠️ 需要 FMP 期貨權限,改用 CME 官網查"}
-    price = float(fmp_q.get("price", 0))
-    if price == 0: return {"狀態":"❌ 無資料"}
-    implied = 100 - price  # 隱含利率
-    return {"年底隱含 Fed Funds%": round(implied, 2),
-            "判讀": "🔴 高利率延續" if implied>4 else "🟢 降息預期" if implied<3.5 else "🟡 中性"}
+    """🏛️ FedWatch 年底利率預期 — Fed Fund Futures 多 symbol 嘗試"""
+    # 試多個 Fed Funds Futures 月份代碼(CME ZQ + 一些別名)
+    today = datetime.now()
+    yr = today.year
+    # 12 月合約代碼 ZQZ + 年末2位
+    yr_suffix = str(yr)[-2:]
+    for sym in [f"ZQZ{yr_suffix}", "FF=F", "ZQ", f"ZQZ{yr_suffix}.CME"]:
+        fmp_q = fmp_quote(sym)
+        if fmp_q and float(fmp_q.get("price", 0)) > 0:
+            price = float(fmp_q["price"])
+            implied = 100 - price
+            return {f"{sym}": round(price, 4),
+                    "年底隱含 Fed Funds%": round(implied, 2),
+                    "判讀": "🔴 高利率延續" if implied>4 else "🟢 降息預期" if implied<3.5 else "🟡 中性"}
+    # 備援:用 FRED 10Y-2Y yield curve 推測
+    y10 = fred("DGS10", days=10)
+    y2 = fred("DGS2", days=10)
+    if y10 is not None and y2 is not None and len(y10) and len(y2):
+        spread = float(y10.iloc[-1]["value"]) - float(y2.iloc[-1]["value"])
+        return {"10Y-2Y 利差%": round(spread, 2), "註": "Fed Futures 抓不到,用利差代理",
+                "判讀": "🔴 倒掛(<0,衰退訊號)" if spread<0 else "🟢 正常(>0)" if spread>0.5 else "🟡 平坦"}
+    return {"狀態":"❌ 無資料"}
 
 
 # ---------- 主程式 ----------

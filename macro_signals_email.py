@@ -46,7 +46,7 @@ def main():
 
     body = f"""
 <html><body style='font-family:-apple-system,sans-serif'>
-<h2>總經 7 信號燈 — {TODAY}</h2>
+<h2>總經 15 信號燈 — {TODAY}</h2>
 <p style='color:#888'>🔴 過熱/危險 {red} | 🟡 警戒 {yellow} | 🟢 健康 {green}</p>
 
 {table_html}
@@ -61,6 +61,14 @@ def main():
 <li><b>台灣出口</b>:YoY > 20% AI 強 / 5-20% 健康 / < 5 弱</li>
 <li><b>SOX</b>:離 52 週高 < 3% 過熱 / -3 ~ -15% 健康 / < -15% 修正中</li>
 <li><b>VIX</b>:> 25 恐慌 / 20-25 警戒 / < 20 平靜</li>
+<li><b>CPI</b>:> 3% 升息壓力 / 2-3% 中性 / < 2% 降息空間</li>
+<li><b>10Y 公債</b>:> 4.5% 緊縮股不利 / 3.5-4.5% 中性 / < 3.5% 寬鬆股利好</li>
+<li><b>FedWatch</b>:年底隱含利率,越低降息預期越強</li>
+<li><b>MOVE</b>:> 130 債市恐慌 / 100-130 警戒 / < 100 平靜</li>
+<li><b>NY Fed 衰退機率</b>:> 30% 高警戒 / 15-30% 警戒 / < 15% 安全</li>
+<li><b>OECD CLI</b>:>100 升=擴張 / <100 降=收縮(全球領先指標)</li>
+<li><b>台灣 GDP YoY</b>:> 5% 強 / 2-5% 中性 / < 2% 弱</li>
+<li><b>CSP 資本支出</b>:YoY > 50% AI 爆 / > 20% 強 / < 0 收縮</li>
 </ul>
 
 <hr>

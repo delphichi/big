@@ -209,9 +209,124 @@ def signal_vix():
             "判讀": "🔴 恐慌(>25)" if price>25 else "🟡 警戒(20-25)" if price>20 else "🟢 平靜(<20)"}
 
 
+# ===== 新增 8 個信號 =====
+
+def signal_cpi():
+    """💸 CPI 通膨 YoY"""
+    df = fred("CPIAUCSL", days=730)  # 總體 CPI
+    core = fred("CPILFESL", days=730)  # 核心 CPI
+    if df is None or len(df) < 13: return {"狀態":"❌ 無資料"}
+    cur = df.iloc[-1]["value"]; yr = df.iloc[-13]["value"]
+    yoy = (cur/yr - 1) * 100
+    core_yoy = None
+    if core is not None and len(core) >= 13:
+        core_yoy = (core.iloc[-1]["value"]/core.iloc[-13]["value"] - 1) * 100
+    date = df.iloc[-1]["date"].strftime("%Y-%m")
+    return {"總 YoY%": round(yoy, 2), "核心 YoY%": round(core_yoy, 2) if core_yoy else None,
+            "資料月": date,
+            "判讀": "🔴 升息壓力" if yoy>3 else "🟢 降息空間" if yoy<2 else "🟡 中性(2-3%)"}
+
+
+def signal_us10y():
+    """📜 10 年公債殖利率"""
+    df = fred("DGS10", days=60)
+    if df is None or len(df) == 0: return {"狀態":"❌ 無資料"}
+    cur = float(df.iloc[-1]["value"])
+    mo_ago = float(df.iloc[-22]["value"]) if len(df) >= 22 else None
+    chg = cur - mo_ago if mo_ago else None
+    return {"10Y%": round(cur, 2), "月變動%": round(chg, 2) if chg else None,
+            "判讀": "🔴 緊縮股不利(>4.5)" if cur>4.5 else "🟢 寬鬆股利好(<3.5)" if cur<3.5 else "🟡 中性(3.5-4.5)"}
+
+
+def signal_recession_prob():
+    """⚠️ NY Fed 12 個月衰退機率"""
+    df = fred("RECPROUSM156N", days=400)
+    if df is None or len(df) == 0: return {"狀態":"❌ 無資料"}
+    cur = float(df.iloc[-1]["value"])
+    yr_ago = float(df.iloc[-13]["value"]) if len(df) >= 13 else None
+    date = df.iloc[-1]["date"].strftime("%Y-%m")
+    return {"衰退機率%": round(cur, 1),
+            "去年同期%": round(yr_ago, 1) if yr_ago else None,
+            "資料月": date,
+            "判讀": "🔴 高(>30%)" if cur>30 else "🟢 低(<15%)" if cur<15 else "🟡 警戒(15-30%)"}
+
+
+def signal_oecd_cli():
+    """🌐 OECD 全球景氣領先指標(>100=擴張)"""
+    df = fred("OECDLOLITOAASTSAM", days=400)
+    if df is None or len(df) == 0: return {"狀態":"❌ 無資料"}
+    cur = float(df.iloc[-1]["value"])
+    mo_ago = float(df.iloc[-2]["value"]) if len(df) >= 2 else None
+    chg = cur - mo_ago if mo_ago else None
+    date = df.iloc[-1]["date"].strftime("%Y-%m")
+    return {"CLI": round(cur, 2),
+            "月變動": round(chg, 2) if chg else None,
+            "資料月": date,
+            "判讀": "🟢 擴張(>100 升)" if cur>100 and chg and chg>0 else
+                   "🟠 擴張中放緩" if cur>100 else
+                   "🔴 收縮(<100 降)" if chg and chg<0 else "🟡 觸底"}
+
+
+def signal_tw_gdp():
+    """🇹🇼 台灣 GDP YoY"""
+    df = fred("NGDPRSAXDCTWQ", days=900)  # 台灣 GDP 季 (LCU)
+    if df is None or len(df) < 5: return {"狀態":"❌ 無資料(可改抓主計總處)"}
+    cur = df.iloc[-1]["value"]
+    yr = df.iloc[-5]["value"]
+    yoy = (cur/yr - 1) * 100
+    date = df.iloc[-1]["date"].strftime("%Y-Q%q")
+    return {"GDP YoY%": round(yoy, 2), "資料季": date,
+            "判讀": "🟢 強(>5%)" if yoy>5 else "🟡 中性(2-5%)" if yoy>2 else "🔴 弱"}
+
+
+def signal_move():
+    """🌀 MOVE 債市波動指數"""
+    fmp_q = fmp_quote("^MOVE")
+    if not fmp_q: return {"狀態":"⚠️ FMP 可能不支援 ^MOVE,改抓 ICE 官網"}
+    price = float(fmp_q.get("price", 0))
+    if price == 0: return {"狀態":"❌ 無資料"}
+    return {"MOVE": round(price, 2),
+            "判讀": "🔴 債市恐慌(>130)" if price>130 else "🟡 警戒(100-130)" if price>100 else "🟢 平靜(<100)"}
+
+
+def signal_csp_capex():
+    """☁️ CSP 4 大廠資本支出加總(MSFT+GOOG+AMZN+META)— 季"""
+    syms = ["MSFT","GOOGL","AMZN","META"]
+    total_cur = 0; total_yr = 0; counted = 0
+    for s in syms:
+        cf = fmp("cash-flow-statement", symbol=s, period="quarter", limit=5)
+        if not cf or len(cf) < 5: continue
+        cur = abs(float(cf[0].get("capitalExpenditure", 0)))
+        yr = abs(float(cf[4].get("capitalExpenditure", 0)))
+        if cur and yr:
+            total_cur += cur; total_yr += yr; counted += 1
+    if counted == 0: return {"狀態":"❌ 無資料"}
+    yoy = (total_cur/total_yr - 1) * 100
+    return {"當季加總(億美)": round(total_cur/1e8, 1),
+            "YoY%": round(yoy, 1),
+            "計入家數": counted,
+            "判讀": "🟢🟢 AI 需求爆(>50%)" if yoy>50 else
+                   "🟢 強(>20%)" if yoy>20 else
+                   "🟡 平(0-20%)" if yoy>0 else "🔴 收縮"}
+
+
+def signal_fed_watch():
+    """🏛️ FedWatch 年底利率預期(從 Fed Fund Futures 反推)"""
+    # 簡化版:用 30-Day Fed Funds Futures(ZQ)隱含利率
+    # FMP 提供 期貨報價,複雜計算這裡簡化為「12 月 ZQ 隱含利率」
+    fmp_q = fmp_quote("ZQZ25.CME") or fmp_quote("ZQ")
+    if not fmp_q: return {"狀態":"⚠️ 需要 FMP 期貨權限,改用 CME 官網查"}
+    price = float(fmp_q.get("price", 0))
+    if price == 0: return {"狀態":"❌ 無資料"}
+    implied = 100 - price  # 隱含利率
+    return {"年底隱含 Fed Funds%": round(implied, 2),
+            "判讀": "🔴 高利率延續" if implied>4 else "🟢 降息預期" if implied<3.5 else "🟡 中性"}
+
+
 # ---------- 主程式 ----------
 def main():
     signals = {
+        # === 原 7 信號 ===
         "🏠 房地產 Case-Shiller": signal_case_shiller(),
         "💰 黃金": signal_gold(),
         "🛢️ 原油 WTI + Cushing": signal_oil(),
@@ -219,9 +334,18 @@ def main():
         "📱 台灣出口 YoY": signal_tw_export(),
         "🔥 半導體 SOX": signal_sox(),
         "😱 VIX 恐慌指數": signal_vix(),
+        # === 新增 8 信號(利率/景氣/AI) ===
+        "💸 CPI 通膨 YoY": signal_cpi(),
+        "📜 10Y 公債殖利率": signal_us10y(),
+        "🏛️ FedWatch 年底利率": signal_fed_watch(),
+        "🌀 MOVE 債市波動": signal_move(),
+        "⚠️ NY Fed 衰退機率": signal_recession_prob(),
+        "🌐 OECD 全球領先指標": signal_oecd_cli(),
+        "🇹🇼 台灣 GDP YoY": signal_tw_gdp(),
+        "☁️ CSP 4 大廠資本支出": signal_csp_capex(),
     }
 
-    print(f"\n=== 總經 7 信號燈 {TODAY} ===\n")
+    print(f"\n=== 總經 {len(signals)} 信號燈 {TODAY} ===\n")
     rows = []
     for name, data in signals.items():
         print(f"\n{name}")

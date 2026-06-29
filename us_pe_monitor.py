@@ -25,17 +25,38 @@ KEY = os.environ.get("FMP_API_KEY", "")
 BASE = "https://financialmodelingprep.com/stable"
 SRC = "data/美股體檢總表.xlsx"
 DST = "data/美股PE監看表.xlsx"
+WATCHLIST_FILE = "data/watchlist_us.txt"
 WORKERS = int(os.environ.get("MONITOR_WORKERS", "6"))
 
-DEFAULT_WATCH = """
-NVDA NVMI ANET KLAC AVGO FTNT ASML TSM LLY BRK-B MSFT META NFLX
-WPM AXP AMZN CDNS CAT HWM AAPL APH GLW GOOG EXEL
-GLD HG CCEP CF AER LIN AMG COST ECL WMT FSLR IDCC NBIX
-CLS LRCX AMD MU MRVL LITE AMAT CIEN COHR WDC VRT PLTR
-CRM ADBE INTU NOW
-GE MCO SPGI CP FER CNI
-MA ORCL CHKP IDXX PAC
-""".split()
+# Fallback(只在 watchlist_us.txt 不存在 + 沒設 WATCHLIST/TICKERS 時用)
+DEFAULT_WATCH = "NVDA AVGO TSM META GOOG MSFT".split()
+
+
+def load_watchlist():
+    """讀 watchlist 優先順序:
+       1. 環境變數 TICKERS / WATCHLIST(空白或逗號分隔)
+       2. data/watchlist_us.txt(一行一檔, # 註解)
+       3. 內建 DEFAULT_WATCH
+    """
+    env = (os.environ.get("TICKERS") or os.environ.get("WATCHLIST") or "").strip()
+    if env:
+        toks = [t.strip().upper() for t in env.replace(",", " ").split() if t.strip()]
+        toks = [t for t in toks if t and not t.startswith("#")]
+        if toks:
+            print(f"  watchlist 來源: 環境變數 ({len(toks)} 檔)")
+            return list(dict.fromkeys(toks))
+    if os.path.exists(WATCHLIST_FILE):
+        toks = []
+        with open(WATCHLIST_FILE, encoding="utf-8") as f:
+            for line in f:
+                line = line.split("#", 1)[0].strip()
+                if not line: continue
+                toks.extend(t.strip().upper() for t in line.split() if t.strip())
+        if toks:
+            print(f"  watchlist 來源: {WATCHLIST_FILE} ({len(toks)} 檔)")
+            return list(dict.fromkeys(toks))
+    print(f"  watchlist 來源: 內建 fallback ({len(DEFAULT_WATCH)} 檔)")
+    return DEFAULT_WATCH
 
 
 def get(endpoint, **params):
@@ -123,8 +144,7 @@ def main():
     if not KEY:
         print("⚠️ 未設 FMP_API_KEY"); return
 
-    watch = os.environ.get("WATCHLIST", "").strip()
-    syms = [s.strip().upper() for s in watch.split(",") if s.strip()] if watch else DEFAULT_WATCH
+    syms = load_watchlist()
     print(f"監看 {len(syms)} 檔")
 
     # 從體檢總表撈基礎欄(品質/EPS3y/含金量/評等等)

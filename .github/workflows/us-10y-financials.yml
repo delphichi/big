@@ -18,6 +18,11 @@ on:
         required: false
         default: "2025"
         type: string
+      debug_ticker:
+        description: "Debug 某一檔 raw 資料(填代號, 留空不開)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -40,6 +45,7 @@ jobs:
           TICKERS: ${{ inputs.tickers }}
           START_YEAR: ${{ inputs.start_year }}
           END_YEAR: ${{ inputs.end_year }}
+          DEBUG_TICKER: ${{ inputs.debug_ticker }}
         run: python us_10y_financials.py
 
       - name: Commit

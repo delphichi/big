@@ -79,6 +79,9 @@ def get(endpoint, **params):
     return None
 
 
+DEBUG_TICKER = os.environ.get("DEBUG_TICKER", "").upper().strip()
+
+
 def fetch_one(sym):
     """抓單一公司財報, 按年份過濾"""
     try:
@@ -86,6 +89,17 @@ def fetch_one(sym):
         cf  = get("cash-flow-statement", symbol=sym, period="annual", limit=FETCH_LIMIT) or []
         bs  = get("balance-sheet-statement", symbol=sym, period="annual", limit=FETCH_LIMIT) or []
         if not inc: return sym, None
+
+        # === DEBUG: 印出 raw 日期欄位讓 user 對照 ===
+        if sym == DEBUG_TICKER:
+            print(f"\n=== DEBUG {sym} raw records ===")
+            for label, recs in [("INC", inc), ("CF", cf), ("BS", bs)]:
+                print(f"--- {label} ({len(recs)} 筆) ---")
+                for r in recs:
+                    print(f"  date={r.get('date')}  calendarYear={r.get('calendarYear')}  "
+                          f"period={r.get('period')}  acceptedDate={r.get('acceptedDate')}  "
+                          f"fillingDate={r.get('fillingDate')}  rev={r.get('revenue')}")
+            print()
         out = {}
         for r in inc:
             # 用 date (fiscal year end) 優先, calendarYear 有些公司會錯位

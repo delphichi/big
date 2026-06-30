@@ -82,6 +82,22 @@ def get(endpoint, **params):
 DEBUG_TICKER = os.environ.get("DEBUG_TICKER", "").upper().strip()
 
 
+def fiscal_year_label(date_str, median_month):
+    """把 fiscal year 結算日 → 年份標籤
+    處理 52/53-週 fiscal year 公司(例 EXEL FY2024 結 2025-01-03):
+    若這筆日期月份 <= 2, 但這檔中位數月份 >= 11(代表多年在 12 月結),
+    則認為是前一年 fiscal cycle, year - 1
+    NVDA(中位數 1 月)/ AAPL(9 月)/ CSCO(7 月)等不受影響
+    """
+    if not date_str or len(date_str) < 7: return None
+    try:
+        y = int(date_str[:4]); m = int(date_str[5:7])
+    except: return None
+    if median_month is not None and median_month >= 11 and m <= 2:
+        y -= 1
+    return str(y)
+
+
 def fetch_one(sym):
     """抓單一公司財報, 按年份過濾"""
     try:
@@ -90,9 +106,18 @@ def fetch_one(sym):
         bs  = get("balance-sheet-statement", symbol=sym, period="annual", limit=FETCH_LIMIT) or []
         if not inc: return sym, None
 
+        # 看這檔的月份中位數(用 INC 算就好, 三表一致)
+        months = []
+        for r in inc:
+            d = r.get("date", "")
+            if d and len(d) >= 7:
+                try: months.append(int(d[5:7]))
+                except: pass
+        median_month = sorted(months)[len(months)//2] if months else None
+
         # === DEBUG: 印出 raw 日期欄位讓 user 對照 ===
         if sym == DEBUG_TICKER:
-            print(f"\n=== DEBUG {sym} raw records ===")
+            print(f"\n=== DEBUG {sym} raw records (median_month={median_month}) ===")
             for label, recs in [("INC", inc), ("CF", cf), ("BS", bs)]:
                 print(f"--- {label} ({len(recs)} 筆) ---")
                 for r in recs:
@@ -102,9 +127,7 @@ def fetch_one(sym):
             print()
         out = {}
         for r in inc:
-            # 用 date (fiscal year end) 優先, calendarYear 有些公司會錯位
-            # (例: EXEL FY2024 10-K 2025/2 才送, FMP 標 calendarYear=2025 → 2024 空)
-            y = r.get("date","")[:4] or r.get("calendarYear")
+            y = fiscal_year_label(r.get("date", ""), median_month)
             if not y or not str(y).isdigit(): continue
             yi = int(y)
             if yi < START_YEAR or yi > END_YEAR: continue
@@ -113,18 +136,14 @@ def fetch_one(sym):
             out[y]["淨利"] = r.get("netIncome")
             out[y]["研發"] = r.get("researchAndDevelopmentExpenses")
         for r in cf:
-            # 用 date (fiscal year end) 優先, calendarYear 有些公司會錯位
-            # (例: EXEL FY2024 10-K 2025/2 才送, FMP 標 calendarYear=2025 → 2024 空)
-            y = r.get("date","")[:4] or r.get("calendarYear")
+            y = fiscal_year_label(r.get("date", ""), median_month)
             if not y or not str(y).isdigit(): continue
             yi = int(y)
             if yi < START_YEAR or yi > END_YEAR: continue
             out.setdefault(y, {})
             out[y]["自由現金流"] = r.get("freeCashFlow")
         for r in bs:
-            # 用 date (fiscal year end) 優先, calendarYear 有些公司會錯位
-            # (例: EXEL FY2024 10-K 2025/2 才送, FMP 標 calendarYear=2025 → 2024 空)
-            y = r.get("date","")[:4] or r.get("calendarYear")
+            y = fiscal_year_label(r.get("date", ""), median_month)
             if not y or not str(y).isdigit(): continue
             yi = int(y)
             if yi < START_YEAR or yi > END_YEAR: continue

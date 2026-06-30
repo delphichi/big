@@ -1,0 +1,67 @@
+name: 週報心動股 + Email
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每週日台北 09:30 (週六 UTC 01:30)
+    - cron: "30 1 * * 0"
+
+permissions:
+  contents: write
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install requests pandas openpyxl
+
+      # ─── 先更新美股六維交叉 ───
+      - name: 更新美股六維交叉
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: python us_six_dim.py || echo "us_six_dim 失敗, 用既有資料"
+
+      # ─── 組 email ───
+      - name: 組週報 email
+        run: python weekly_picks_email.py
+
+      - name: 讀 subject
+        id: prep
+        run: |
+          SUB=$(cat /tmp/weekly_subject.txt)
+          echo "subject=$SUB" >> $GITHUB_OUTPUT
+
+      - name: 寄 Gmail
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: ${{ steps.prep.outputs.subject }}
+          html_body: file:///tmp/weekly_body.html
+          to: delphichi@gmail.com
+          from: 心動股週報 <${{ secrets.GMAIL_USER }}>
+          attachments: "data/美股95檔_六維交叉.xlsx,data/台股100檔_六維交叉.xlsx"
+          convert_markdown: false
+
+      - name: Commit snapshot
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/weekly_picks_prev.json data/美股95檔_六維交叉.xlsx || true
+          if git diff --staged --quiet; then echo "無變更"; exit 0; fi
+          git commit -m "data: 週報心動股 snapshot"
+          for i in 1 2 3 4 5; do
+            git fetch origin main -q && git merge origin/main -X ours --no-edit >/dev/null 2>&1
+            git push && { echo pushed; exit 0; }
+            sleep 6
+          done

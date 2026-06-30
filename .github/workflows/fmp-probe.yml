@@ -1,0 +1,45 @@
+name: FMP 端點偵錯
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "用哪檔當樣本(預設 NVDA)"
+        required: false
+        default: "NVDA"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+
+      - name: 跑 FMP 端點偵錯
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          PROBE_TICKER: ${{ inputs.ticker }}
+          OUT: "data/fmp_probe_${{ inputs.ticker }}.txt"
+        run: python fmp_probe.py
+
+      - name: Commit
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/fmp_probe_*.txt || true
+          if git diff --staged --quiet; then echo "無變更"; exit 0; fi
+          git commit -m "data: FMP 端點偵錯結果 (${{ inputs.ticker }})"
+          for i in 1 2 3 4 5; do
+            git fetch origin main -q && git merge origin/main -X ours --no-edit >/dev/null 2>&1
+            git push && { echo pushed; exit 0; }
+            sleep 6
+          done

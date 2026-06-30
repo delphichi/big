@@ -32,8 +32,10 @@ DST = "data/台股_10年財務.xlsx"
 WATCHLIST_FILE = "data/watchlist_tw.txt"
 WORKERS = int(os.environ.get("WORKERS", "4"))
 
-# 抓近 11 年 (含當年, 多一年保險)
-START_DATE = f"{datetime.now().year - 10}-01-01"
+START_YEAR = int(os.environ.get("START_YEAR", "2016"))
+END_YEAR = int(os.environ.get("END_YEAR", str(datetime.now().year - 1)))
+START_DATE = f"{START_YEAR}-01-01"
+END_DATE = f"{END_YEAR}-12-31"
 
 
 def load_watchlist():
@@ -61,7 +63,8 @@ def load_watchlist():
 
 def fm_get(dataset, sid):
     """FinMind v4 同步抓資料,回傳 DataFrame"""
-    params = {"dataset": dataset, "data_id": sid, "start_date": START_DATE}
+    params = {"dataset": dataset, "data_id": sid,
+              "start_date": START_DATE, "end_date": END_DATE}
     if TOKEN: params["token"] = TOKEN
     for attempt in range(3):
         try:
@@ -94,11 +97,11 @@ def fetch_one(sid):
         out = {}  # {year: {metric: value}}
 
         # === 營收: 年加總月營收(精準, 沒被四季加總誤差影響)===
+        # 一律要求 12 個月才採用, 避免不完整年混進來
         if not mrev.empty and "revenue" in mrev.columns:
             mrev["year"] = mrev["date"].astype(str).str[:4]
             for y, sub in mrev.groupby("year"):
-                if len(sub) < 12 and int(y) < datetime.now().year:
-                    continue  # 不滿 12 個月先跳過(當年除外)
+                if len(sub) < 12: continue
                 out.setdefault(y, {})["營收"] = sub["revenue"].sum()
 
         # === 淨利 / 研發: 季加總 ===
@@ -183,11 +186,28 @@ def to_billions(v):
         return None
 
 
+def cagr(start, end, n):
+    if start is None or end is None: return None
+    try:
+        if start <= 0 or end <= 0 or n <= 0: return None
+        return round(((end/start)**(1/n) - 1) * 100, 1)
+    except: return None
+
+
+def yoy(prev, cur):
+    if prev is None or cur is None: return None
+    try:
+        if prev == 0: return None
+        return round((cur/prev - 1) * 100, 1)
+    except: return None
+
+
 def main():
     if not TOKEN:
         print("⚠️ 未設 FINMIND_TOKEN(免費版速率慢, 建議付費版)")
     codes = load_watchlist()
-    print(f"抓 {len(codes)} 檔 10 年財務(平行 {WORKERS})")
+    print(f"年份範圍: {START_YEAR} ~ {END_YEAR}")
+    print(f"抓 {len(codes)} 檔財務(平行 {WORKERS})")
 
     results = {}
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
@@ -213,10 +233,7 @@ def main():
         except Exception as e:
             print(f"  ⚠️ 讀 {src} 失敗 {e}")
 
-    # 取近 10 年
-    all_years = sorted({y for v in results.values() for y in v.keys()}, reverse=True)[:10]
-    all_years_asc = sorted(all_years)
-    print(f"年份範圍: {all_years_asc[0] if all_years_asc else '?'} ~ {all_years_asc[-1] if all_years_asc else '?'}")
+    years_asc = [str(y) for y in range(START_YEAR, END_YEAR + 1)]
 
     metrics = ["營收","淨利","自由現金流","研發","庫存","負債比%"]
     sheets = {m: [] for m in metrics}
@@ -227,7 +244,7 @@ def main():
         data = results[sid]
         for m in metrics:
             row = {"代號": sid}
-            for y in all_years_asc:
+            for y in years_asc:
                 v = data.get(y, {}).get(m)
                 if m == "負債比%":
                     row[y] = v
@@ -235,49 +252,63 @@ def main():
                     row[y] = to_billions(v)
             sheets[m].append(row)
 
-        latest_y = max((y for y in all_years_asc if y in data and data[y].get("營收")), default=None)
-        oldest_y = min((y for y in all_years_asc if y in data and data[y].get("營收")), default=None)
-        rev_latest = data.get(latest_y, {}).get("營收") if latest_y else None
-        rev_oldest = data.get(oldest_y, {}).get("營收") if oldest_y else None
-        rev_cagr = None
-        if rev_latest and rev_oldest and rev_oldest > 0:
-            n = int(latest_y) - int(oldest_y)
-            if n > 0:
-                rev_cagr = round(((rev_latest/rev_oldest)**(1/n) - 1) * 100, 1)
+        def get_series(metric):
+            return {y: data.get(y, {}).get(metric) for y in years_asc}
+        rev = get_series("營收"); ni = get_series("淨利"); fcf = get_series("自由現金流")
+
+        Y_end = str(END_YEAR)
+        def gc(d, n): return cagr(d.get(str(END_YEAR - n)), d.get(Y_end), n)
+        def y1(d):    return yoy(d.get(str(END_YEAR - 1)), d.get(Y_end))
+
+        rev_e = rev.get(Y_end); ni_e = ni.get(Y_end); fcf_e = fcf.get(Y_end)
+        rev_s = rev.get(str(START_YEAR)); ni_s = ni.get(str(START_YEAR))
+        nm_end = round(ni_e/rev_e*100, 1) if rev_e and ni_e and rev_e > 0 else None
+        nm_start = round(ni_s/rev_s*100, 1) if rev_s and ni_s and rev_s > 0 else None
+        nm_delta = round(nm_end - nm_start, 1) if nm_end is not None and nm_start is not None else None
+        fc_ratio = round(fcf_e/ni_e*100, 0) if fcf_e and ni_e and ni_e > 0 else None
+
         overview.append({
             "代號": sid,
-            "最新年": latest_y,
-            "營收(億)": to_billions(rev_latest),
-            "淨利(億)": to_billions(data.get(latest_y, {}).get("淨利")),
-            "FCF(億)": to_billions(data.get(latest_y, {}).get("自由現金流")),
-            "研發(億)": to_billions(data.get(latest_y, {}).get("研發")),
-            "庫存(億)": to_billions(data.get(latest_y, {}).get("庫存")),
-            "負債比%": data.get(latest_y, {}).get("負債比%"),
-            "10y營收CAGR%": rev_cagr,
+            "起年": START_YEAR, "迄年": END_YEAR,
+            f"{START_YEAR}營收(億)": to_billions(rev_s),
+            f"{END_YEAR}營收(億)": to_billions(rev_e),
+            f"{END_YEAR}淨利(億)": to_billions(ni_e),
+            f"{END_YEAR}FCF(億)": to_billions(fcf_e),
+            f"{END_YEAR}研發(億)": to_billions(data.get(Y_end, {}).get("研發")),
+            f"{END_YEAR}庫存(億)": to_billions(data.get(Y_end, {}).get("庫存")),
+            f"{END_YEAR}負債比%": data.get(Y_end, {}).get("負債比%"),
+            "營收10y%": gc(rev, 10), "營收5y%": gc(rev, 5), "營收3y%": gc(rev, 3), "營收1y%": y1(rev),
+            "淨利10y%": gc(ni, 10),  "淨利5y%": gc(ni, 5),  "淨利3y%": gc(ni, 3),  "淨利1y%": y1(ni),
+            "FCF10y%":  gc(fcf, 10), "FCF5y%":  gc(fcf, 5), "FCF3y%":  gc(fcf, 3), "FCF1y%":  y1(fcf),
+            "淨利率%": nm_end, "淨利率Δpp": nm_delta, "FCF/NI%": fc_ratio,
         })
 
     ov = pd.DataFrame(overview)
     if not base.empty:
+        # 統一型別:base 代號可能是 str, results sid 是 str → ov 代號也要 str
+        ov["代號"] = ov["代號"].astype(str)
         ov = ov.merge(base, on="代號", how="left")
         front = [c for c in ["代號","名稱","產業","評等","品質總分"] if c in ov.columns]
         rest = [c for c in ov.columns if c not in front]
         ov = ov[front + rest]
-    ov = ov.sort_values("10y營收CAGR%", ascending=False, na_position="last")
+    ov = ov.sort_values("營收3y%", ascending=False, na_position="last")
 
     os.makedirs("data", exist_ok=True)
     with pd.ExcelWriter(DST, engine="openpyxl") as xw:
         ov.to_excel(xw, sheet_name="概覽", index=False)
         for m in metrics:
             df = pd.DataFrame(sheets[m])
+            df["代號"] = df["代號"].astype(str)
             if not base.empty and "名稱" in base.columns:
                 df = df.merge(base[["代號","名稱"]], on="代號", how="left")
-            cols = ["代號","名稱"] + sorted([c for c in df.columns if c not in ("代號","名稱")])
+            cols = ["代號","名稱"] + [y for y in years_asc if y in df.columns]
             df = df[[c for c in cols if c in df.columns]]
             df.to_excel(xw, sheet_name=m, index=False)
 
     print(f"\n→ 已輸出 {DST}")
-    print(f"\n=== 10y 營收 CAGR TOP 15 ===")
-    show_cols = [c for c in ["代號","名稱","評等","營收(億)","FCF(億)","10y營收CAGR%"] if c in ov.columns]
+    print(f"分頁: 概覽 + {' / '.join(metrics)}")
+    print(f"\n=== 營收 3y CAGR TOP 15 ({START_YEAR}~{END_YEAR}) ===")
+    show_cols = [c for c in ["代號","名稱","評等","營收5y%","營收3y%","營收1y%","淨利3y%","FCF3y%","淨利率Δpp","FCF/NI%"] if c in ov.columns]
     print(ov[show_cols].head(15).to_string(index=False))
 
 

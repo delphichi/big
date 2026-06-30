@@ -88,7 +88,9 @@ def fetch_one(sym):
         if not inc: return sym, None
         out = {}
         for r in inc:
-            y = r.get("calendarYear") or r.get("date","")[:4]
+            # 用 date (fiscal year end) 優先, calendarYear 有些公司會錯位
+            # (例: EXEL FY2024 10-K 2025/2 才送, FMP 標 calendarYear=2025 → 2024 空)
+            y = r.get("date","")[:4] or r.get("calendarYear")
             if not y or not str(y).isdigit(): continue
             yi = int(y)
             if yi < START_YEAR or yi > END_YEAR: continue
@@ -97,14 +99,18 @@ def fetch_one(sym):
             out[y]["淨利"] = r.get("netIncome")
             out[y]["研發"] = r.get("researchAndDevelopmentExpenses")
         for r in cf:
-            y = r.get("calendarYear") or r.get("date","")[:4]
+            # 用 date (fiscal year end) 優先, calendarYear 有些公司會錯位
+            # (例: EXEL FY2024 10-K 2025/2 才送, FMP 標 calendarYear=2025 → 2024 空)
+            y = r.get("date","")[:4] or r.get("calendarYear")
             if not y or not str(y).isdigit(): continue
             yi = int(y)
             if yi < START_YEAR or yi > END_YEAR: continue
             out.setdefault(y, {})
             out[y]["自由現金流"] = r.get("freeCashFlow")
         for r in bs:
-            y = r.get("calendarYear") or r.get("date","")[:4]
+            # 用 date (fiscal year end) 優先, calendarYear 有些公司會錯位
+            # (例: EXEL FY2024 10-K 2025/2 才送, FMP 標 calendarYear=2025 → 2024 空)
+            y = r.get("date","")[:4] or r.get("calendarYear")
             if not y or not str(y).isdigit(): continue
             yi = int(y)
             if yi < START_YEAR or yi > END_YEAR: continue

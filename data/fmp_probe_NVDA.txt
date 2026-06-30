@@ -1,0 +1,767 @@
+=== FMP 端點偵錯 (NVDA) ===
+
+
+======================================================================
+📈 報價即時
+======================================================================
+
+✅ [200] /quote  symbol=NVDA
+   📝 即時報價 + PE/EPS/52w 高低
+   ⇢ list[1] × dict(17 fields):
+   欄位: ['symbol', 'name', 'price', 'changePercentage', 'change', 'volume', 'dayLow', 'dayHigh', 'yearHigh', 'yearLow', 'marketCap', 'priceAvg50', 'priceAvg200', 'exchange', 'open', 'previousClose', 'timestamp']
+   第一筆例: {"symbol": "NVDA", "name": "NVIDIA Corporation", "price": 198.53, "changePercentage": 1.82592, "change": 3.56, "volume": 52222698, "dayLow": 195.11, "dayHigh": 199.0599, "yearHigh": 236.54, "yearLow": 151.49, "marketCap": 4808595130000, "priceAvg50": 210.0184, "priceAvg200": 190.7284, "exchange": "NASDAQ", "open": 197.195, "previousClose": 194.97, 
+
+✅ [200] /quote-short  symbol=NVDA
+   📝 簡版報價
+   ⇢ list[1] × dict(4 fields):
+   欄位: ['symbol', 'price', 'change', 'volume']
+   第一筆例: {"symbol": "NVDA", "price": 198.53, "change": 3.56, "volume": 52222698}
+
+✅ [200] /aftermarket-quote  symbol=NVDA
+   📝 盤後報價
+   ⇢ list[1] × dict(7 fields):
+   欄位: ['symbol', 'bidSize', 'bidPrice', 'askSize', 'askPrice', 'volume', 'timestamp']
+   第一筆例: {"symbol": "NVDA", "bidSize": 1, "bidPrice": 198.48, "askSize": 1, "askPrice": 198.55, "volume": 52223492, "timestamp": 1782836220000}
+
+✅ [200] /stock-price-change  symbol=NVDA
+   📝 1d/5d/1m/3m/1y 漲跌
+   ⇢ list[1] × dict(12 fields):
+   欄位: ['symbol', '1D', '5D', '1M', '3M', '6M', 'ytd', '1Y', '3Y', '5Y', '10Y', 'max']
+   第一筆例: {"symbol": "NVDA", "1D": 1.83474, "5D": -0.76609356, "1M": -5.96419, "3M": 20.20779, "6M": 5.86925, "ytd": 6.45962, "1Y": 25.67074, "3Y": 369.37872, "5Y": 892.736, "10Y": 16726.0339, "max": 483961.93545}
+
+======================================================================
+🏢 公司資訊
+======================================================================
+
+✅ [200] /profile  symbol=NVDA
+   📝 公司簡介 + 產業 + CEO + 員工數
+   ⇢ list[1] × dict(36 fields):
+   欄位: ['symbol', 'price', 'marketCap', 'beta', 'lastDividend', 'range', 'change', 'changePercentage', 'volume', 'averageVolume', 'companyName', 'currency', 'cik', 'isin', 'cusip', 'exchangeFullName', 'exchange', 'industry', 'website', 'description', 'ceo', 'sector', 'country', 'fullTimeEmployees', 'phone']...
+   第一筆例: {"symbol": "NVDA", "price": 198.5472, "marketCap": 4809011731200, "beta": 2.202, "lastDividend": 0.28, "range": "151.49-236.54", "change": 3.5772, "changePercentage": 1.83474, "volume": 52225812, "averageVolume": 160883770, "companyName": "NVIDIA Corporation", "currency": "USD", "cik": "0001045810", "isin": "US67066G1040", "cusip": "67066G104", "ex
+
+✅ [200] /market-capitalization  symbol=NVDA
+   📝 市值
+   ⇢ list[1] × dict(3 fields):
+   欄位: ['symbol', 'date', 'marketCap']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-30", "marketCap": 4809011731200}
+
+✅ [200] /historical-market-capitalization  symbol=NVDA from=2025-01-01 limit=5
+   📝 歷史市值
+   ⇢ list[5] × dict(3 fields):
+   欄位: ['symbol', 'date', 'marketCap']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-30", "marketCap": 4811299460000}
+
+✅ [200] /shares-float  symbol=NVDA
+   📝 流通股數 / 內部人持有比例
+   ⇢ list[1] × dict(6 fields):
+   欄位: ['symbol', 'date', 'freeFloat', 'floatShares', 'outstandingShares', 'source']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-28 03:06:50", "freeFloat": 95.88879071879774, "floatShares": 23225224000, "outstandingShares": 24221000000, "source": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000052/nvda-20260426.htm"}
+
+✅ [200] /key-executives  symbol=NVDA
+   📝 高管名單
+   ⇢ list[12] × dict(8 fields):
+   欄位: ['title', 'name', 'pay', 'currencyPay', 'gender', 'yearBorn', 'titleSince', 'active']
+   第一筆例: {"title": "Executive Vice President & Chief Financial Officer", "name": "Colette Kress", "pay": 1514979, "currencyPay": "USD", "gender": "female", "yearBorn": 1967, "titleSince": null, "active": true}
+
+✅ [200] /employee-count  symbol=NVDA limit=3
+   📝 員工數歷年
+   ⇢ list[3] × dict(9 fields):
+   欄位: ['symbol', 'cik', 'acceptanceTime', 'periodOfReport', 'companyName', 'formType', 'filingDate', 'employeeCount', 'source']
+   第一筆例: {"symbol": "NVDA", "cik": "0001045810", "acceptanceTime": "2026-02-25 16:42:19", "periodOfReport": "2026-01-25", "companyName": "NVIDIA Corporation", "formType": "10-K", "filingDate": "2026-02-25", "employeeCount": 42000, "source": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/0001045810-26-000021-index.htm"}
+
+✅ [200] /historical-employee-count  symbol=NVDA limit=5
+   📝 員工數歷年(更詳細)
+   ⇢ list[5] × dict(9 fields):
+   欄位: ['symbol', 'cik', 'acceptanceTime', 'periodOfReport', 'companyName', 'formType', 'filingDate', 'employeeCount', 'source']
+   第一筆例: {"symbol": "NVDA", "cik": "0001045810", "acceptanceTime": "2026-02-25 16:42:19", "periodOfReport": "2026-01-25", "companyName": "NVIDIA Corporation", "formType": "10-K", "filingDate": "2026-02-25", "employeeCount": 42000, "source": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/0001045810-26-000021-index.htm"}
+
+❌ [402] /executive-compensation-benchmark  symbol=NVDA
+   📝 高管薪酬
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+✅ [200] /stock-peers  symbol=NVDA
+   📝 FMP 推算的同業公司
+   ⇢ list[9] × dict(4 fields):
+   欄位: ['symbol', 'companyName', 'price', 'mktCap']
+   第一筆例: {"symbol": "AAPL", "companyName": "Apple Inc.", "price": 288.3043, "mktCap": 4234427890431}
+
+======================================================================
+📊 三大報表(年)
+======================================================================
+
+✅ [200] /income-statement  symbol=NVDA period=annual limit=3
+   📝 損益表
+   ⇢ list[3] × dict(39 fields):
+   欄位: ['date', 'symbol', 'reportedCurrency', 'cik', 'filingDate', 'acceptedDate', 'fiscalYear', 'period', 'revenue', 'costOfRevenue', 'grossProfit', 'researchAndDevelopmentExpenses', 'generalAndAdministrativeExpenses', 'sellingAndMarketingExpenses', 'sellingGeneralAndAdministrativeExpenses', 'otherExpenses', 'operatingExpenses', 'costAndExpenses', 'netInterestIncome', 'interestIncome', 'interestExpense', 'depreciationAndAmortization', 'ebitda', 'ebit', 'nonOperatingIncomeExcludingInterest']...
+   第一筆例: {"date": "2026-01-25", "symbol": "NVDA", "reportedCurrency": "USD", "cik": "0001045810", "filingDate": "2026-02-25", "acceptedDate": "2026-02-25 16:42:19", "fiscalYear": "2026", "period": "FY", "revenue": 215938000000, "costOfRevenue": 62475000000, "grossProfit": 153463000000, "researchAndDevelopmentExpenses": 18497000000, "generalAndAdministrative
+
+✅ [200] /balance-sheet-statement  symbol=NVDA period=annual limit=3
+   📝 資產負債表
+   ⇢ list[3] × dict(61 fields):
+   欄位: ['date', 'symbol', 'reportedCurrency', 'cik', 'filingDate', 'acceptedDate', 'fiscalYear', 'period', 'cashAndCashEquivalents', 'shortTermInvestments', 'cashAndShortTermInvestments', 'netReceivables', 'accountsReceivables', 'otherReceivables', 'inventory', 'prepaids', 'otherCurrentAssets', 'totalCurrentAssets', 'propertyPlantEquipmentNet', 'goodwill', 'intangibleAssets', 'goodwillAndIntangibleAssets', 'longTermInvestments', 'taxAssets', 'otherNonCurrentAssets']...
+   第一筆例: {"date": "2026-01-25", "symbol": "NVDA", "reportedCurrency": "USD", "cik": "0001045810", "filingDate": "2026-02-25", "acceptedDate": "2026-02-25 16:42:19", "fiscalYear": "2026", "period": "FY", "cashAndCashEquivalents": 10605000000, "shortTermInvestments": 51951000000, "cashAndShortTermInvestments": 62556000000, "netReceivables": 38466000000, "acco
+
+✅ [200] /cash-flow-statement  symbol=NVDA period=annual limit=3
+   📝 現金流量表
+   ⇢ list[3] × dict(47 fields):
+   欄位: ['date', 'symbol', 'reportedCurrency', 'cik', 'filingDate', 'acceptedDate', 'fiscalYear', 'period', 'netIncome', 'depreciationAndAmortization', 'deferredIncomeTax', 'stockBasedCompensation', 'changeInWorkingCapital', 'accountsReceivables', 'inventory', 'accountsPayables', 'otherWorkingCapital', 'otherNonCashItems', 'netCashProvidedByOperatingActivities', 'investmentsInPropertyPlantAndEquipment', 'acquisitionsNet', 'purchasesOfInvestments', 'salesMaturitiesOfInvestments', 'otherInvestingActivities', 'netCashProvidedByInvestingActivities']...
+   第一筆例: {"date": "2026-01-25", "symbol": "NVDA", "reportedCurrency": "USD", "cik": "0001045810", "filingDate": "2026-02-25", "acceptedDate": "2026-02-25 16:42:19", "fiscalYear": "2026", "period": "FY", "netIncome": 120067000000, "depreciationAndAmortization": 2843000000, "deferredIncomeTax": -1424000000, "stockBasedCompensation": 6386000000, "changeInWorki
+
+❌ [402] /income-statement-ttm  symbol=NVDA
+   📝 TTM 損益
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /cash-flow-statement-ttm  symbol=NVDA
+   📝 TTM 現金流
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /balance-sheet-statement-ttm  symbol=NVDA
+   📝 TTM 資產負債
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /latest-financial-statements  symbol=NVDA
+   📝 最新三表
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+✅ [200] /financial-reports-dates  symbol=NVDA
+   📝 10-K/10-Q 日期
+   ⇢ list[12] × dict(5 fields):
+   欄位: ['symbol', 'fiscalYear', 'period', 'linkJson', 'linkXlsx']
+   第一筆例: {"symbol": "NVDA", "fiscalYear": 2027, "period": "Q1", "linkJson": "https://financialmodelingprep.com/stable/financial-reports-json?symbol=NVDA&year=2027&period=Q1&apikey=YOUR_API_KEY", "linkXlsx": "https://financialmodelingprep.com/stable/financial-reports-xlsx?symbol=NVDA&year=2027&period=Q1&apikey=YOUR_API_KEY"}
+
+======================================================================
+📈 成長率現成
+======================================================================
+
+✅ [200] /income-statement-growth  symbol=NVDA period=annual limit=3
+   📝 損益表 YoY
+   ⇢ list[3] × dict(34 fields):
+   欄位: ['symbol', 'date', 'fiscalYear', 'period', 'reportedCurrency', 'growthRevenue', 'growthCostOfRevenue', 'growthGrossProfit', 'growthGrossProfitRatio', 'growthResearchAndDevelopmentExpenses', 'growthGeneralAndAdministrativeExpenses', 'growthSellingAndMarketingExpenses', 'growthOtherExpenses', 'growthOperatingExpenses', 'growthCostAndExpenses', 'growthInterestIncome', 'growthInterestExpense', 'growthDepreciationAndAmortization', 'growthEBITDA', 'growthOperatingIncome', 'growthIncomeBeforeTax', 'growthIncomeTaxExpense', 'growthNetIncome', 'growthEPS', 'growthEPSDiluted']...
+   第一筆例: {"symbol": "NVDA", "date": "2026-01-25", "fiscalYear": "2026", "period": "FY", "reportedCurrency": "USD", "growthRevenue": 0.654735357900948, "growthCostOfRevenue": 0.9141211434173842, "growthGrossProfit": 0.5682213002513846, "growthGrossProfitRatio": -0.05228271531192282, "growthResearchAndDevelopmentExpenses": 0.43232151153786585, "growthGeneralA
+
+✅ [200] /balance-sheet-statement-growth  symbol=NVDA period=annual limit=3
+   📝 BS YoY
+   ⇢ list[3] × dict(56 fields):
+   欄位: ['symbol', 'date', 'fiscalYear', 'period', 'reportedCurrency', 'growthCashAndCashEquivalents', 'growthShortTermInvestments', 'growthCashAndShortTermInvestments', 'growthNetReceivables', 'growthInventory', 'growthOtherCurrentAssets', 'growthTotalCurrentAssets', 'growthPropertyPlantEquipmentNet', 'growthGoodwill', 'growthIntangibleAssets', 'growthGoodwillAndIntangibleAssets', 'growthLongTermInvestments', 'growthTaxAssets', 'growthOtherNonCurrentAssets', 'growthTotalNonCurrentAssets', 'growthOtherAssets', 'growthTotalAssets', 'growthAccountPayables', 'growthShortTermDebt', 'growthTaxPayables']...
+   第一筆例: {"symbol": "NVDA", "date": "2026-01-25", "fiscalYear": "2026", "period": "FY", "reportedCurrency": "USD", "growthCashAndCashEquivalents": 0.23471882640586797, "growthShortTermInvestments": 0.5005632419629704, "growthCashAndShortTermInvestments": 0.4477204350844712, "growthNetReceivables": 0.667721656189031, "growthInventory": 1.123313492063492, "gr
+
+✅ [200] /cash-flow-statement-growth  symbol=NVDA period=annual limit=3
+   📝 CF YoY
+   ⇢ list[3] × dict(42 fields):
+   欄位: ['symbol', 'date', 'fiscalYear', 'period', 'reportedCurrency', 'growthNetIncome', 'growthDepreciationAndAmortization', 'growthDeferredIncomeTax', 'growthStockBasedCompensation', 'growthChangeInWorkingCapital', 'growthAccountsReceivables', 'growthInventory', 'growthAccountsPayables', 'growthOtherWorkingCapital', 'growthOtherNonCashItems', 'growthNetCashProvidedByOperatingActivites', 'growthInvestmentsInPropertyPlantAndEquipment', 'growthAcquisitionsNet', 'growthPurchasesOfInvestments', 'growthSalesMaturitiesOfInvestments', 'growthOtherInvestingActivites', 'growthNetCashUsedForInvestingActivites', 'growthDebtRepayment', 'growthCommonStockIssued', 'growthCommonStockRepurchased']...
+   第一筆例: {"symbol": "NVDA", "date": "2026-01-25", "fiscalYear": "2026", "period": "FY", "reportedCurrency": "USD", "growthNetIncome": 0.6474615806805708, "growthDepreciationAndAmortization": 0.5252145922746781, "growthDeferredIncomeTax": 0.6819298637480455, "growthStockBasedCompensation": 0.34811061853493774, "growthChangeInWorkingCapital": -0.6997761909836
+
+✅ [200] /financial-growth  symbol=NVDA period=annual limit=3
+   📝 綜合 3y/5y/10y CAGR ⭐
+   ⇢ list[3] × dict(44 fields):
+   欄位: ['symbol', 'date', 'fiscalYear', 'period', 'reportedCurrency', 'revenueGrowth', 'grossProfitGrowth', 'ebitgrowth', 'operatingIncomeGrowth', 'netIncomeGrowth', 'epsgrowth', 'epsdilutedGrowth', 'weightedAverageSharesGrowth', 'weightedAverageSharesDilutedGrowth', 'dividendsPerShareGrowth', 'operatingCashFlowGrowth', 'receivablesGrowth', 'inventoryGrowth', 'assetGrowth', 'bookValueperShareGrowth', 'debtGrowth', 'rdexpenseGrowth', 'sgaexpensesGrowth', 'freeCashFlowGrowth', 'tenYRevenueGrowthPerShare']...
+   第一筆例: {"symbol": "NVDA", "date": "2026-01-25", "fiscalYear": "2026", "period": "FY", "reportedCurrency": "USD", "revenueGrowth": 0.654735357900948, "grossProfitGrowth": 0.5682213002513846, "ebitgrowth": 0.6815468774103213, "operatingIncomeGrowth": 0.6007636305599549, "netIncomeGrowth": 0.6474615806805708, "epsgrowth": 0.6599326599326597, "epsdilutedGrowt
+
+======================================================================
+🌍 營收細分
+======================================================================
+
+✅ [200] /revenue-geographic-segmentation  symbol=NVDA period=annual limit=3
+   📝 地理區域 ⭐
+   ⇢ list[16] × dict(6 fields):
+   欄位: ['symbol', 'fiscalYear', 'period', 'reportedCurrency', 'date', 'data']
+   第一筆例: {"symbol": "NVDA", "fiscalYear": 2026, "period": "FY", "reportedCurrency": "USD", "date": "2026-01-25", "data": {"CHINA": 19677000000, "Other Americas": 4299000000, "TAIWAN, PROVINCE OF CHINA": 42345000000, "UNITED STATES": 149617000000}}
+
+✅ [200] /revenue-product-segmentation  symbol=NVDA period=annual limit=3
+   📝 產品線 ⭐
+   ⇢ list[15] × dict(6 fields):
+   欄位: ['symbol', 'fiscalYear', 'period', 'reportedCurrency', 'date', 'data']
+   第一筆例: {"symbol": "NVDA", "fiscalYear": 2026, "period": "FY", "reportedCurrency": "USD", "date": "2026-01-25", "data": {"Automotive": 2349000000, "Data Center": 193737000000, "Gaming": 16042000000, "OEM And Other": 619000000, "Professional Visualization": 3191000000}}
+
+======================================================================
+💎 估值 / 比率
+======================================================================
+
+✅ [200] /ratios  symbol=NVDA period=annual limit=3
+   📝 估值比率 PE/PB/ROE
+   ⇢ list[3] × dict(64 fields):
+   欄位: ['symbol', 'date', 'fiscalYear', 'period', 'reportedCurrency', 'grossProfitMargin', 'ebitMargin', 'ebitdaMargin', 'operatingProfitMargin', 'pretaxProfitMargin', 'continuousOperationsProfitMargin', 'netProfitMargin', 'bottomLineProfitMargin', 'receivablesTurnover', 'payablesTurnover', 'inventoryTurnover', 'fixedAssetTurnover', 'assetTurnover', 'currentRatio', 'quickRatio', 'solvencyRatio', 'cashRatio', 'priceToEarningsRatio', 'priceToEarningsGrowthRatio', 'forwardPriceToEarningsGrowthRatio']...
+   第一筆例: {"symbol": "NVDA", "date": "2026-01-25", "fiscalYear": "2026", "period": "FY", "reportedCurrency": "USD", "grossProfitMargin": 0.7106808435754708, "ebitMargin": 0.656248552825348, "ebitdaMargin": 0.6694143689392326, "operatingProfitMargin": 0.6038168363141272, "pretaxProfitMargin": 0.6550491344737841, "continuousOperationsProfitMargin": 0.556025340
+
+✅ [200] /ratios-ttm  symbol=NVDA
+   📝 TTM 比率
+   ⇢ list[1] × dict(60 fields):
+   欄位: ['symbol', 'grossProfitMarginTTM', 'ebitMarginTTM', 'ebitdaMarginTTM', 'operatingProfitMarginTTM', 'pretaxProfitMarginTTM', 'continuousOperationsProfitMarginTTM', 'netProfitMarginTTM', 'bottomLineProfitMarginTTM', 'receivablesTurnoverTTM', 'payablesTurnoverTTM', 'inventoryTurnoverTTM', 'fixedAssetTurnoverTTM', 'assetTurnoverTTM', 'currentRatioTTM', 'quickRatioTTM', 'solvencyRatioTTM', 'cashRatioTTM', 'priceToEarningsRatioTTM', 'priceToEarningsGrowthRatioTTM', 'forwardPriceToEarningsGrowthRatioTTM', 'priceToBookRatioTTM', 'priceToSalesRatioTTM', 'priceToFreeCashFlowRatioTTM', 'priceToOperatingCashFlowRatioTTM']...
+   第一筆例: {"symbol": "NVDA", "grossProfitMarginTTM": 0.741454331711974, "ebitMarginTTM": 0.7476991293576498, "ebitdaMarginTTM": 0.7604372541825942, "operatingProfitMarginTTM": 0.6402002437956377, "pretaxProfitMarginTTM": 0.7473361973403395, "continuousOperationsProfitMarginTTM": 0.629659435640713, "netProfitMarginTTM": 0.629659435640713, "bottomLineProfitMar
+
+✅ [200] /key-metrics  symbol=NVDA period=annual limit=3
+   📝 關鍵指標
+   ⇢ list[3] × dict(47 fields):
+   欄位: ['symbol', 'date', 'fiscalYear', 'period', 'reportedCurrency', 'marketCap', 'enterpriseValue', 'evToSales', 'evToOperatingCashFlow', 'evToFreeCashFlow', 'evToEBITDA', 'netDebtToEBITDA', 'currentRatio', 'incomeQuality', 'grahamNumber', 'grahamNetNet', 'taxBurden', 'interestBurden', 'workingCapital', 'investedCapital', 'returnOnAssets', 'operatingReturnOnAssets', 'returnOnTangibleAssets', 'returnOnEquity', 'returnOnInvestedCapital']...
+   第一筆例: {"symbol": "NVDA", "date": "2026-01-25", "fiscalYear": "2026", "period": "FY", "reportedCurrency": "USD", "marketCap": 4542222730000, "enterpriseValue": 4543029730000, "evToSales": 21.038583899082145, "evToOperatingCashFlow": 44.22817549017699, "evToFreeCashFlow": 46.99232208614341, "evToEBITDA": 31.428342257457523, "netDebtToEBITDA": 0.00558276606
+
+✅ [200] /key-metrics-ttm  symbol=NVDA
+   📝 TTM 關鍵指標
+   ⇢ list[1] × dict(43 fields):
+   欄位: ['symbol', 'marketCap', 'enterpriseValueTTM', 'evToSalesTTM', 'evToOperatingCashFlowTTM', 'evToFreeCashFlowTTM', 'evToEBITDATTM', 'netDebtToEBITDATTM', 'currentRatioTTM', 'incomeQualityTTM', 'grahamNumberTTM', 'grahamNetNetTTM', 'taxBurdenTTM', 'interestBurdenTTM', 'workingCapitalTTM', 'investedCapitalTTM', 'returnOnAssetsTTM', 'operatingReturnOnAssetsTTM', 'returnOnTangibleAssetsTTM', 'returnOnEquityTTM', 'returnOnInvestedCapitalTTM', 'returnOnCapitalEmployedTTM', 'earningsYieldTTM', 'freeCashFlowYieldTTM', 'capexToOperatingCashFlowTTM']...
+   第一筆例: {"symbol": "NVDA", "marketCap": 4806170607900, "enterpriseValueTTM": 4805747607900, "evToSalesTTM": 18.95825732629561, "evToOperatingCashFlowTTM": 38.24770476171527, "evToFreeCashFlowTTM": 40.358658402196916, "evToEBITDATTM": 24.930731920379323, "netDebtToEBITDATTM": -0.00219439314394804, "currentRatioTTM": 3.440775681341719, "incomeQualityTTM": 0.
+
+✅ [200] /enterprise-values  symbol=NVDA period=annual limit=3
+   📝 企業價值 EV
+   ⇢ list[3] × dict(8 fields):
+   欄位: ['symbol', 'date', 'stockPrice', 'numberOfShares', 'marketCapitalization', 'minusCashAndCashEquivalents', 'addTotalDebt', 'enterpriseValue']
+   第一筆例: {"symbol": "NVDA", "date": "2026-01-25", "stockPrice": 186.47, "numberOfShares": 24359000000, "marketCapitalization": 4542222730000, "minusCashAndCashEquivalents": 10605000000, "addTotalDebt": 11412000000, "enterpriseValue": 4543029730000}
+
+✅ [200] /owner-earnings  symbol=NVDA limit=3
+   📝 Buffett 式 Owner Earnings ⭐
+   ⇢ list[3] × dict(10 fields):
+   欄位: ['symbol', 'reportedCurrency', 'fiscalYear', 'period', 'date', 'averagePPE', 'maintenanceCapex', 'ownersEarnings', 'growthCapex', 'ownersEarningsPerShare']
+   第一筆例: {"symbol": "NVDA", "reportedCurrency": "USD", "fiscalYear": "2027", "period": "Q1", "date": "2026-04-26", "averagePPE": 0.08220719, "maintenanceCapex": 1330126606, "ownersEarnings": 51674126606, "growthCapex": -3087126606, "ownersEarningsPerShare": 2.12}
+
+✅ [200] /financial-scores  symbol=NVDA
+   📝 FMP 自家評分(Piotroski/Altman)
+   ⇢ list[1] × dict(11 fields):
+   欄位: ['symbol', 'reportedCurrency', 'altmanZScore', 'piotroskiScore', 'workingCapital', 'totalAssets', 'retainedEarnings', 'ebit', 'marketCap', 'totalLiabilities', 'revenue']
+   第一筆例: {"symbol": "NVDA", "reportedCurrency": "USD", "altmanZScore": 48.59934197059315, "piotroskiScore": 7, "workingCapital": 107111000000, "totalAssets": 259474000000, "retainedEarnings": 185038000000, "ebit": 189535000000, "marketCap": 4663269130000, "totalLiabilities": 64000000000, "revenue": 253491000000}
+
+✅ [200] /discounted-cash-flow  symbol=NVDA
+   📝 DCF 估值
+   ⇢ list[1] × dict(4 fields):
+   欄位: ['symbol', 'date', 'dcf', 'Stock Price']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-30", "dcf": 248.6195039197979, "Stock Price": 194.97}
+
+✅ [200] /levered-discounted-cash-flow  symbol=NVDA
+   📝 Levered DCF
+   ⇢ list[1] × dict(4 fields):
+   欄位: ['symbol', 'date', 'dcf', 'Stock Price']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-30", "dcf": 259.38662244963507, "Stock Price": 194.97}
+
+======================================================================
+🔮 分析師預估
+======================================================================
+
+✅ [200] /analyst-estimates  symbol=NVDA period=annual limit=3
+   📝 EPS / 營收預估
+   ⇢ list[3] × dict(22 fields):
+   欄位: ['symbol', 'date', 'revenueLow', 'revenueHigh', 'revenueAvg', 'ebitdaLow', 'ebitdaHigh', 'ebitdaAvg', 'ebitLow', 'ebitHigh', 'ebitAvg', 'netIncomeLow', 'netIncomeHigh', 'netIncomeAvg', 'sgaExpenseLow', 'sgaExpenseHigh', 'sgaExpenseAvg', 'epsAvg', 'epsHigh', 'epsLow', 'numAnalystsRevenue', 'numAnalystsEps']
+   第一筆例: {"symbol": "NVDA", "date": "2031-01-25", "revenueLow": 810885246152, "revenueHigh": 1154106113110, "revenueAvg": 1005000000000, "ebitdaLow": 414723377420, "ebitdaHigh": 590262046821, "ebitdaAvg": 514002439045, "ebitLow": 389906025979, "ebitHigh": 554940332502, "ebitAvg": 483244155654, "netIncomeLow": 367173878834, "netIncomeHigh": 584842019603, "ne
+
+✅ [200] /price-target-summary  symbol=NVDA
+   📝 目標價 summary
+   ⇢ list[1] × dict(10 fields):
+   欄位: ['symbol', 'lastMonthCount', 'lastMonthAvgPriceTarget', 'lastQuarterCount', 'lastQuarterAvgPriceTarget', 'lastYearCount', 'lastYearAvgPriceTarget', 'allTimeCount', 'allTimeAvgPriceTarget', 'publishers']
+   第一筆例: {"symbol": "NVDA", "lastMonthCount": 0, "lastMonthAvgPriceTarget": 0, "lastQuarterCount": 26, "lastQuarterAvgPriceTarget": 317.5, "lastYearCount": 85, "lastYearAvgPriceTarget": 276.6, "allTimeCount": 317, "allTimeAvgPriceTarget": 138.19, "publishers": "[\"TheFly\",\"StreetInsider\",\"Benzinga\",\"Pulse 2.0\",\"TipRanks Contributor\",\"MarketWatch\"
+
+✅ [200] /price-target-consensus  symbol=NVDA
+   📝 目標價共識
+   ⇢ list[1] × dict(5 fields):
+   欄位: ['symbol', 'targetHigh', 'targetLow', 'targetConsensus', 'targetMedian']
+   第一筆例: {"symbol": "NVDA", "targetHigh": 500, "targetLow": 218, "targetConsensus": 316.79, "targetMedian": 300}
+
+✅ [200] /ratings-snapshot  symbol=NVDA
+   📝 FMP 自家評等
+   ⇢ list[1] × dict(9 fields):
+   欄位: ['symbol', 'rating', 'overallScore', 'discountedCashFlowScore', 'returnOnEquityScore', 'returnOnAssetsScore', 'debtToEquityScore', 'priceToEarningsScore', 'priceToBookScore']
+   第一筆例: {"symbol": "NVDA", "rating": "A-", "overallScore": 4, "discountedCashFlowScore": 4, "returnOnEquityScore": 5, "returnOnAssetsScore": 5, "debtToEquityScore": 3, "priceToEarningsScore": 2, "priceToBookScore": 1}
+
+✅ [200] /ratings-historical  symbol=NVDA limit=5
+   📝 歷史評等
+   ⇢ list[5] × dict(10 fields):
+   欄位: ['symbol', 'date', 'rating', 'overallScore', 'discountedCashFlowScore', 'returnOnEquityScore', 'returnOnAssetsScore', 'debtToEquityScore', 'priceToEarningsScore', 'priceToBookScore']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-29", "rating": "A-", "overallScore": 4, "discountedCashFlowScore": 4, "returnOnEquityScore": 5, "returnOnAssetsScore": 5, "debtToEquityScore": 3, "priceToEarningsScore": 2, "priceToBookScore": 1}
+
+✅ [200] /grades  symbol=NVDA limit=5
+   📝 華爾街評等
+   ⇢ list[1130] × dict(6 fields):
+   欄位: ['symbol', 'date', 'gradingCompany', 'previousGrade', 'newGrade', 'action']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-02", "gradingCompany": "Needham", "previousGrade": "Buy", "newGrade": "Buy", "action": "maintain"}
+
+✅ [200] /grades-consensus  symbol=NVDA
+   📝 華爾街評等共識
+   ⇢ list[1] × dict(7 fields):
+   欄位: ['symbol', 'strongBuy', 'buy', 'hold', 'sell', 'strongSell', 'consensus']
+   第一筆例: {"symbol": "NVDA", "strongBuy": 2, "buy": 58, "hold": 16, "sell": 3, "strongSell": 0, "consensus": "Buy"}
+
+✅ [200] /grades-historical  symbol=NVDA limit=5
+   📝 華爾街評等歷史
+   ⇢ list[5] × dict(7 fields):
+   欄位: ['symbol', 'date', 'analystRatingsStrongBuy', 'analystRatingsBuy', 'analystRatingsHold', 'analystRatingsSell', 'analystRatingsStrongSell']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-01", "analystRatingsStrongBuy": 10, "analystRatingsBuy": 49, "analystRatingsHold": 2, "analystRatingsSell": 1, "analystRatingsStrongSell": 0}
+
+❌ [402] /tipranks-symbol-summary  symbol=NVDA
+   📝 TipRanks 評等(可能付費)
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+======================================================================
+📅 財報日曆
+======================================================================
+
+✅ [200] /earnings  symbol=NVDA limit=4
+   📝 歷史財報日期
+   ⇢ list[4] × dict(7 fields):
+   欄位: ['symbol', 'date', 'epsActual', 'epsEstimated', 'revenueActual', 'revenueEstimated', 'lastUpdated']
+   第一筆例: {"symbol": "NVDA", "date": "2026-08-26", "epsActual": null, "epsEstimated": 2.08, "revenueActual": null, "revenueEstimated": 91710240000, "lastUpdated": "2026-06-30"}
+
+✅ [200] /earnings-calendar  
+   📝 全市場財報日曆
+   ⇢ list[4000] × dict(7 fields):
+   欄位: ['symbol', 'date', 'epsActual', 'epsEstimated', 'revenueActual', 'revenueEstimated', 'lastUpdated']
+   第一筆例: {"symbol": "HREEF", "date": "2026-06-30", "epsActual": null, "epsEstimated": null, "revenueActual": null, "revenueEstimated": null, "lastUpdated": "2026-06-30"}
+
+❌ [402] /earning-call-transcript  symbol=NVDA year=2025
+   📝 法說會逐字稿 ⭐
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /earning-call-transcript-dates  symbol=NVDA
+   📝 法說會日期
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+======================================================================
+💰 股利 / 拆股
+======================================================================
+
+✅ [200] /dividends  symbol=NVDA limit=5
+   📝 歷史股利
+   ⇢ list[5] × dict(9 fields):
+   欄位: ['symbol', 'date', 'recordDate', 'paymentDate', 'declarationDate', 'adjDividend', 'dividend', 'yield', 'frequency']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-04", "recordDate": "2026-06-04", "paymentDate": "2026-06-26", "declarationDate": "2026-05-20", "adjDividend": 0.25, "dividend": 0.25, "yield": 0.12805268453306504, "frequency": "Quarterly"}
+
+✅ [200] /dividends-calendar  
+   📝 全市場除息日曆
+   ⇢ list[4000] × dict(9 fields):
+   欄位: ['symbol', 'date', 'recordDate', 'paymentDate', 'declarationDate', 'adjDividend', 'dividend', 'yield', 'frequency']
+   第一筆例: {"symbol": "SYK", "date": "2026-06-30", "recordDate": "2026-06-30", "paymentDate": "2026-07-31", "declarationDate": "2026-05-06", "adjDividend": 0.88, "dividend": 0.88, "yield": 1.1074161880061735, "frequency": "Quarterly"}
+
+✅ [200] /splits  symbol=NVDA limit=5
+   📝 歷史拆股
+   ⇢ list[5] × dict(5 fields):
+   欄位: ['symbol', 'date', 'numerator', 'denominator', 'splitType']
+   第一筆例: {"symbol": "NVDA", "date": "2024-06-10", "numerator": 10, "denominator": 1, "splitType": "stock-split"}
+
+✅ [200] /splits-calendar  
+   📝 全市場拆股日曆
+   ⇢ list[369] × dict(5 fields):
+   欄位: ['symbol', 'date', 'numerator', 'denominator', 'splitType']
+   第一筆例: {"symbol": "JBDI", "date": "2026-06-30", "numerator": 1, "denominator": 2, "splitType": "stock-split"}
+
+======================================================================
+🏦 持股 / 內部人 / 國會
+======================================================================
+
+❌ [402] /institutional-ownership/latest  symbol=NVDA limit=5
+   📝 機構持股最新
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /institutional-ownership/extract  symbol=NVDA year=2025 quarter=3
+   📝 機構持股展開
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /institutional-ownership/symbol-positions-summary  symbol=NVDA year=2025 quarter=3
+   📝 機構持股 summary
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+✅ [200] /insider-trading/search  symbol=NVDA limit=5
+   📝 內部人交易 ⭐
+   ⇢ list[5] × dict(16 fields):
+   欄位: ['symbol', 'filingDate', 'transactionDate', 'reportingCik', 'companyCik', 'transactionType', 'securitiesOwned', 'reportingName', 'typeOfOwner', 'acquisitionOrDisposition', 'directOrIndirect', 'formType', 'securitiesTransacted', 'price', 'securityName', 'url']
+   第一筆例: {"symbol": "NVDA", "filingDate": "2026-06-29", "transactionDate": "2026-06-25", "reportingCik": "0001199039", "companyCik": "0001045810", "transactionType": "A-Award", "securitiesOwned": 11544612, "reportingName": "STEVENS MARK A", "typeOfOwner": "director", "acquisitionOrDisposition": "A", "directOrIndirect": "D", "formType": "4", "securitiesTrans
+
+✅ [200] /insider-trading/statistics  symbol=NVDA
+   📝 內部人交易統計
+   ⇢ list[101] × dict(13 fields):
+   欄位: ['symbol', 'cik', 'year', 'quarter', 'acquiredTransactions', 'disposedTransactions', 'acquiredDisposedRatio', 'totalAcquired', 'totalDisposed', 'averageAcquired', 'averageDisposed', 'totalPurchases', 'totalSales']
+   第一筆例: {"symbol": "NVDA", "cik": "0001045810", "year": 2026, "quarter": 2, "acquiredTransactions": 2, "disposedTransactions": 7, "acquiredDisposedRatio": 0.2857, "totalAcquired": 59509, "totalDisposed": 1723625, "averageAcquired": 29754.5, "averageDisposed": 246232.1429, "totalPurchases": 0, "totalSales": 5}
+
+✅ [200] /acquisition-of-beneficial-ownership  symbol=NVDA
+   📝 5%+ 持股變動
+   ⇢ list[53] × dict(15 fields):
+   欄位: ['cik', 'symbol', 'filingDate', 'acceptedDate', 'cusip', 'nameOfReportingPerson', 'citizenshipOrPlaceOfOrganization', 'soleVotingPower', 'sharedVotingPower', 'soleDispositivePower', 'sharedDispositivePower', 'amountBeneficiallyOwned', 'percentOfClass', 'typeOfReportingPerson', 'url']
+   第一筆例: {"cik": "0001045810", "symbol": "NVDA", "filingDate": "2026-04-28", "acceptedDate": "2026-04-28", "cusip": "67066G104", "nameOfReportingPerson": "Vanguard Capital Management", "citizenshipOrPlaceOfOrganization": "PENNSYLVANIA", "soleVotingPower": "0", "sharedVotingPower": "0", "soleDispositivePower": "0", "sharedDispositivePower": "0", "amountBenef
+
+✅ [200] /senate-trades  symbol=NVDA
+   📝 參議員交易此檔 ⭐
+   ⇢ list[100] × dict(16 fields):
+   欄位: ['symbol', 'senateID', 'disclosureDate', 'transactionDate', 'firstName', 'lastName', 'office', 'district', 'owner', 'assetDescription', 'assetType', 'type', 'amount', 'capitalGainsOver200USD', 'comment', 'link']
+   第一筆例: {"symbol": "NVDA", "senateID": "W000802", "disclosureDate": "2026-06-02", "transactionDate": "2026-05-08", "firstName": "Sheldon", "lastName": "Whitehouse", "office": "Sheldon Whitehouse", "district": "RI", "owner": "Spouse", "assetDescription": "NVIDIA Corporation", "assetType": "Stock", "type": "Sale", "amount": "$100,001 - $250,000", "capitalGai
+
+✅ [200] /house-trades  symbol=NVDA
+   📝 眾議員交易此檔 ⭐
+   ⇢ list[100] × dict(16 fields):
+   欄位: ['symbol', 'senateID', 'disclosureDate', 'transactionDate', 'firstName', 'lastName', 'office', 'district', 'owner', 'assetDescription', 'assetType', 'type', 'amount', 'capitalGainsOver200USD', 'comment', 'link']
+   第一筆例: {"symbol": "NVDA", "senateID": null, "disclosureDate": "2026-06-17", "transactionDate": "2026-06-16", "firstName": "Matt", "lastName": "Van Epps", "office": "Matt Van Epps", "district": "", "owner": "", "assetDescription": "NVIDIA Corporation", "assetType": "Stock", "type": "Sale", "amount": "$1,001 - $15,000", "capitalGainsOver200USD": "False", "c
+
+❌ [402] /etf/holdings  symbol=NVDA
+   📝 (輸 ETF 代號才有效)
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /etf/asset-exposure  symbol=NVDA
+   📝 哪些 ETF 持有這檔 ⭐
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+======================================================================
+📉 歷史價量
+======================================================================
+
+✅ [200] /historical-price-eod/light  symbol=NVDA from=2025-12-01
+   📝 日 K(輕)
+   ⇢ list[145] × dict(4 fields):
+   欄位: ['symbol', 'date', 'price', 'volume']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-30", "price": 198.44, "volume": 51429184}
+
+✅ [200] /historical-price-eod/full  symbol=NVDA from=2025-12-01
+   📝 日 K(完整 + adj close)
+   ⇢ list[145] × dict(10 fields):
+   欄位: ['symbol', 'date', 'open', 'high', 'low', 'close', 'volume', 'change', 'changePercent', 'vwap']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-30", "open": 197.195, "high": 199.0599, "low": 195.11, "close": 198.44, "volume": 51429184, "change": 1.25, "changePercent": 0.63135475, "vwap": 197.54}
+
+✅ [200] /historical-price-eod/dividend-adjusted  symbol=NVDA from=2025-12-01
+   📝 股利調整
+   ⇢ list[145] × dict(7 fields):
+   欄位: ['symbol', 'date', 'adjOpen', 'adjHigh', 'adjLow', 'adjClose', 'volume']
+   第一筆例: {"symbol": "NVDA", "date": "2026-06-30", "adjOpen": 197.2, "adjHigh": 199.06, "adjLow": 195.11, "adjClose": 198.44, "volume": 51429184}
+
+❌ [404] /historical-chart/1day  symbol=NVDA from=2025-12-01
+   📝 日線
+   ⇢ [非 JSON] []
+
+✅ [200] /historical-chart/1hour  symbol=NVDA from=2025-12-29
+   📝 小時線
+   ⇢ list[423] × dict(6 fields):
+   欄位: ['date', 'open', 'low', 'high', 'close', 'volume']
+   第一筆例: {"date": "2026-06-30 11:30:00", "open": 198.23, "low": 197.8599, "high": 198.61, "close": 198.32001, "volume": 7175298.325790003}
+
+======================================================================
+📊 技術指標
+======================================================================
+
+✅ [200] /technical-indicators/sma  symbol=NVDA periodLength=50 timeframe=1day from=2025-12-01
+   📝 MA50
+   ⇢ list[145] × dict(7 fields):
+   欄位: ['date', 'open', 'high', 'low', 'close', 'volume', 'sma']
+   第一筆例: {"date": "2026-06-30 00:00:00", "open": 197.195, "high": 199.0599, "low": 195.11, "close": 198.44, "volume": 51429184, "sma": 209.95359999999997}
+
+✅ [200] /technical-indicators/ema  symbol=NVDA periodLength=20 timeframe=1day from=2025-12-01
+   📝 EMA20
+   ⇢ list[145] × dict(7 fields):
+   欄位: ['date', 'open', 'high', 'low', 'close', 'volume', 'ema']
+   第一筆例: {"date": "2026-06-30 00:00:00", "open": 197.195, "high": 199.0599, "low": 195.11, "close": 198.44, "volume": 51429184, "ema": 204.0606066616776}
+
+✅ [200] /technical-indicators/rsi  symbol=NVDA periodLength=14 timeframe=1day from=2025-12-01
+   📝 RSI14
+   ⇢ list[145] × dict(7 fields):
+   欄位: ['date', 'open', 'high', 'low', 'close', 'volume', 'rsi']
+   第一筆例: {"date": "2026-06-30 00:00:00", "open": 197.195, "high": 199.0599, "low": 195.11, "close": 198.44, "volume": 51429184, "rsi": 43.6593876174773}
+
+✅ [200] /technical-indicators/adx  symbol=NVDA periodLength=14 timeframe=1day from=2025-12-01
+   📝 ADX
+   ⇢ list[145] × dict(7 fields):
+   欄位: ['date', 'open', 'high', 'low', 'close', 'volume', 'adx']
+   第一筆例: {"date": "2026-06-30 00:00:00", "open": 197.195, "high": 199.0599, "low": 195.11, "close": 198.44, "volume": 51429184, "adx": 17.574049650535734}
+
+✅ [200] /technical-indicators/standarddeviation  symbol=NVDA periodLength=20 timeframe=1day from=2025-12-01
+   📝 標準差
+   ⇢ list[145] × dict(7 fields):
+   欄位: ['date', 'open', 'high', 'low', 'close', 'volume', 'standardDeviation']
+   第一筆例: {"date": "2026-06-30 00:00:00", "open": 197.195, "high": 199.0599, "low": 195.11, "close": 198.44, "volume": 51429184, "standardDeviation": 7.705733887826647}
+
+======================================================================
+📁 SEC 文件
+======================================================================
+
+❌ [400] /sec-filings-search/symbol  symbol=NVDA limit=5
+   📝 近期 SEC filings
+   ⇢ [非 JSON] Query Error: Invalid or missing query parameter - from
+
+✅ [200] /sec-filings-financials  symbol=NVDA limit=3
+   📝 財報文件
+   ⇢ list[3] × dict(8 fields):
+   欄位: ['symbol', 'cik', 'filingDate', 'acceptedDate', 'formType', 'hasFinancials', 'link', 'finalLink']
+   第一筆例: {"symbol": "DNN", "cik": "0001063259", "filingDate": "2024-03-01 00:00:00", "acceptedDate": "2024-03-01 16:52:35", "formType": "6-K", "hasFinancials": true, "link": "https://www.sec.gov/Archives/edgar/data/1063259/000110465924030026/0001104659-24-030026-index.htm", "finalLink": "https://www.sec.gov/Archives/edgar/data/1063259/000110465924030026/dnn
+
+✅ [200] /sec-filings-8k  symbol=NVDA limit=3
+   📝 8-K 重大事件
+   ⇢ list[3] × dict(8 fields):
+   欄位: ['symbol', 'cik', 'filingDate', 'acceptedDate', 'formType', 'hasFinancials', 'link', 'finalLink']
+   第一筆例: {"symbol": "SUNE", "cik": "0000022701", "filingDate": "2024-03-04 00:00:00", "acceptedDate": "2024-03-01 22:47:48", "formType": "8-K", "hasFinancials": null, "link": "https://www.sec.gov/Archives/edgar/data/22701/000089710124000091/0000897101-24-000091-index.htm", "finalLink": "https://www.sec.gov/Archives/edgar/data/22701/000089710124000091/pegy24
+
+✅ [200] /sec-profile  symbol=NVDA
+   📝 SEC profile
+   ⇢ list[1] × dict(35 fields):
+   欄位: ['symbol', 'cik', 'registrantName', 'sicCode', 'sicDescription', 'sicGroup', 'isin', 'businessAddress', 'mailingAddress', 'phoneNumber', 'postalCode', 'city', 'state', 'country', 'description', 'ceo', 'website', 'exchange', 'stateLocation', 'stateOfIncorporation', 'fiscalYearEnd', 'ipoDate', 'employees', 'secFilingsUrl', 'taxIdentificationNumber']...
+   第一筆例: {"symbol": "NVDA", "cik": "0001045810", "registrantName": "NVIDIA Corporation", "sicCode": "3674", "sicDescription": "Semiconductors & Related Devices", "sicGroup": "Semiconductors", "isin": "US67066G1040", "businessAddress": "2788 SAN TOMAS EXPRESSWAY,SANTA CLARA CA 95051,408-486-2000", "mailingAddress": "2788 SAN TOMAS EXPRESSWAY,SANTA CLARA CA 9
+
+✅ [200] /financial-reports-json  symbol=NVDA year=2024 period=FY
+   📝 完整財報 JSON
+   ⇢ dict(92 keys): ['symbol', 'period', 'year', 'Cover Page', 'Audit Information', 'Consolidated Statements of Inco', 'Consolidated Statements of Comp', 'Consolidated Balance Sheets', 'Consolidated Balance Sheets (Pa', 'Consolidated Statements of Shar']
+
+======================================================================
+🌿 ESG
+======================================================================
+
+❌ [402] /esg-disclosures  symbol=NVDA
+   📝 ESG 揭露
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /esg-ratings  symbol=NVDA
+   📝 ESG 評等
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /esg-benchmark  year=2024
+   📝 ESG 產業基準
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+======================================================================
+🌍 整體市場
+======================================================================
+
+✅ [200] /biggest-gainers  
+   📝 今日漲幅前列
+   ⇢ list[50] × dict(6 fields):
+   欄位: ['symbol', 'price', 'name', 'change', 'changesPercentage', 'exchange']
+   第一筆例: {"symbol": "CELZ", "price": 2.6502, "name": "Creative Medical Technology Holdings, Inc.", "change": 1.84, "changesPercentage": 227.10442, "exchange": "NASDAQ"}
+
+✅ [200] /biggest-losers  
+   📝 今日跌幅前列
+   ⇢ list[50] × dict(6 fields):
+   欄位: ['symbol', 'price', 'name', 'change', 'changesPercentage', 'exchange']
+   第一筆例: {"symbol": "YHC", "price": 0.1191, "name": "LQR House Inc.", "change": -0.8109, "changesPercentage": -87.19355, "exchange": "NASDAQ"}
+
+✅ [200] /most-actives  
+   📝 今日成交量前列
+   ⇢ list[50] × dict(6 fields):
+   欄位: ['symbol', 'price', 'name', 'change', 'changesPercentage', 'exchange']
+   第一筆例: {"symbol": "SOXS", "price": 3.305, "name": "Direxion Daily Semiconductor Bear 3X ETF", "change": -0.41, "changesPercentage": -11.03634, "exchange": "AMEX"}
+
+❌ [404] /market-hours  exchange=NASDAQ
+   📝 市場開盤狀態
+   ⇢ [非 JSON] []
+
+✅ [200] /sector-performance-snapshot  date=2025-12-01
+   📝 各產業表現 ⭐
+   ⇢ list[11] × dict(4 fields):
+   欄位: ['date', 'sector', 'exchange', 'averageChange']
+   第一筆例: {"date": "2025-12-01", "sector": "Basic Materials", "exchange": "NASDAQ", "averageChange": -0.7039039437735539}
+
+✅ [200] /industry-performance-snapshot  date=2025-12-01
+   📝 細產業表現 ⭐
+   ⇢ list[126] × dict(4 fields):
+   欄位: ['date', 'industry', 'exchange', 'averageChange']
+   第一筆例: {"date": "2025-12-01", "industry": "Advertising Agencies", "exchange": "NASDAQ", "averageChange": -0.08308410537752886}
+
+✅ [200] /sector-pe-snapshot  date=2025-12-01
+   📝 各產業 PE ⭐
+   ⇢ list[11] × dict(4 fields):
+   欄位: ['date', 'sector', 'exchange', 'pe']
+   第一筆例: {"date": "2025-12-01", "sector": "Basic Materials", "exchange": "NASDAQ", "pe": 24.323783553106548}
+
+✅ [200] /industry-pe-snapshot  date=2025-12-01
+   📝 細產業 PE ⭐
+   ⇢ list[126] × dict(4 fields):
+   欄位: ['date', 'industry', 'exchange', 'pe']
+   第一筆例: {"date": "2025-12-01", "industry": "Advertising Agencies", "exchange": "NASDAQ", "pe": 23.695462502301034}
+
+✅ [200] /historical-sector-pe  sector=Technology from=2025-01-01
+   📝 歷史產業 PE ⭐
+   ⇢ [] (空陣列)
+
+✅ [200] /historical-industry-pe  industry=Semiconductors from=2025-01-01
+   📝 歷史細產業 PE
+   ⇢ [] (空陣列)
+
+✅ [200] /historical-sector-performance  sector=Technology from=2025-01-01
+   📝 歷史產業表現
+   ⇢ [] (空陣列)
+
+✅ [200] /historical-industry-performance  industry=Semiconductors from=2025-01-01
+   📝 歷史細產業表現
+   ⇢ [] (空陣列)
+
+✅ [200] /treasury-rates  from=2025-12-01
+   📝 美國公債利率
+   ⇢ list[145] × dict(13 fields):
+   欄位: ['date', 'month1', 'month2', 'month3', 'month6', 'year1', 'year2', 'year3', 'year5', 'year7', 'year10', 'year20', 'year30']
+   第一筆例: {"date": "2026-06-29", "month1": 3.71, "month2": 3.76, "month3": 3.87, "month6": 4, "year1": 3.97, "year2": 4.1, "year3": 4.1, "year5": 4.14, "year7": 4.24, "year10": 4.38, "year20": 4.86, "year30": 4.86}
+
+✅ [200] /economic-indicators  name=CPI
+   📝 經濟指標(CPI/GDP/失業率)⭐
+   ⇢ list[10] × dict(3 fields):
+   欄位: ['name', 'date', 'value']
+   第一筆例: {"name": "CPI", "date": "2026-05-01", "value": 333.979}
+
+✅ [200] /economic-calendar  from=2025-12-15
+   📝 經濟事件日曆
+   ⇢ list[15858] × dict(11 fields):
+   欄位: ['date', 'country', 'event', 'currency', 'previous', 'estimate', 'actual', 'change', 'impact', 'changePercentage', 'unit']
+   第一筆例: {"date": "2026-06-30 23:50:00", "country": "JP", "event": "Tankan All Small Industry CAPEX (Q2)", "currency": "JPY", "previous": -8.1, "estimate": null, "actual": null, "change": null, "impact": "Low", "changePercentage": null, "unit": "%"}
+
+✅ [200] /market-risk-premium  
+   📝 市場風險溢酬
+   ⇢ list[192] × dict(4 fields):
+   欄位: ['country', 'continent', 'countryRiskPremium', 'totalEquityRiskPremium']
+   第一筆例: {"country": "Zimbabwe", "continent": "Africa", "countryRiskPremium": 11.66, "totalEquityRiskPremium": 15.89}
+
+======================================================================
+📑 指數成分
+======================================================================
+
+❌ [402] /sp500-constituent  
+   📝 S&P 500 成分
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /nasdaq-constituent  
+   📝 NASDAQ 成分
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /dowjones-constituent  
+   📝 Dow 30 成分
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /historical-sp500-constituent  
+   📝 歷史 S&P 500 異動
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+======================================================================
+🚀 IPO / M&A
+======================================================================
+
+✅ [200] /ipos-calendar  
+   📝 IPO 日曆
+   ⇢ list[439] × dict(9 fields):
+   欄位: ['symbol', 'date', 'daa', 'company', 'exchange', 'actions', 'shares', 'priceRange', 'marketCap']
+   第一筆例: {"symbol": "RANK", "date": "2026-06-30", "daa": "2026-06-30T04:00:00.000Z", "company": "Tidal Trust II", "exchange": "NYSE", "actions": "Expected", "shares": null, "priceRange": null, "marketCap": null}
+
+✅ [200] /ipos-disclosure  
+   📝 IPO 揭露
+   ⇢ list[10079] × dict(7 fields):
+   欄位: ['symbol', 'filingDate', 'acceptedDate', 'effectivenessDate', 'cik', 'form', 'url']
+   第一筆例: {"symbol": "ARKX", "filingDate": "2026-06-29", "acceptedDate": "2026-06-29", "effectivenessDate": "2026-06-29", "cik": "0001579982", "form": "CERT", "url": "https://www.sec.gov/Archives/edgar/data/1579982/000141783526000189/8A_Cert_ARKE.pdf"}
+
+✅ [200] /ipos-prospectus  
+   📝 IPO 招股書
+   ⇢ list[146] × dict(13 fields):
+   欄位: ['symbol', 'acceptedDate', 'filingDate', 'ipoDate', 'cik', 'pricePublicPerShare', 'pricePublicTotal', 'discountsAndCommissionsPerShare', 'discountsAndCommissionsTotal', 'proceedsBeforeExpensesPerShare', 'proceedsBeforeExpensesTotal', 'form', 'url']
+   第一筆例: {"symbol": "XHLD", "acceptedDate": "2026-06-29", "filingDate": "2026-06-29", "ipoDate": "2025-02-12", "cik": "0002030954", "pricePublicPerShare": 1, "pricePublicTotal": 7500000, "discountsAndCommissionsPerShare": 0.07, "discountsAndCommissionsTotal": 525000, "proceedsBeforeExpensesPerShare": 0.93, "proceedsBeforeExpensesTotal": 6975000, "form": "42
+
+✅ [200] /mergers-acquisitions-latest  
+   📝 最新 M&A
+   ⇢ list[100] × dict(9 fields):
+   欄位: ['symbol', 'companyName', 'cik', 'targetedCompanyName', 'targetedCik', 'targetedSymbol', 'transactionDate', 'acceptedDate', 'link']
+   第一筆例: {"symbol": "CYCCP", "companyName": "Cyclacel Pharmaceuticals, Inc.", "cik": "0001130166", "targetedCompanyName": "Bio Green Med Solution, Inc.", "targetedCik": "0001130166", "targetedSymbol": "BGMS", "transactionDate": "2026-06-16", "acceptedDate": "2026-06-16 16:06:28", "link": "https://www.sec.gov/Archives/edgar/data/1130166/000149315226028882/fo
+
+❌ [402] /mergers-acquisitions-search  name=NVIDIA
+   📝 搜 M&A
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+✅ [200] /fundraising-latest  
+   📝 最新私募
+   ⇢ list[10] × dict(43 fields):
+   欄位: ['cik', 'companyName', 'date', 'filingDate', 'acceptedDate', 'formType', 'formSignification', 'entityName', 'issuerStreet', 'issuerCity', 'issuerStateOrCountry', 'issuerStateOrCountryDescription', 'issuerZipCode', 'issuerPhoneNumber', 'jurisdictionOfIncorporation', 'entityType', 'incorporatedWithinFiveYears', 'yearOfIncorporation', 'relatedPersonFirstName', 'relatedPersonLastName', 'relatedPersonStreet', 'relatedPersonCity', 'relatedPersonStateOrCountry', 'relatedPersonStateOrCountryDescription', 'relatedPersonZipCode']...
+   第一筆例: {"cik": "0002142163", "companyName": "MCP Beloit Investors, LLC", "date": "2026-06-30", "filingDate": "2026-06-30 00:00:00", "acceptedDate": "2026-06-30 12:15:10", "formType": "D", "formSignification": "Notice of Exempt Offering of Securities", "entityName": "MCP Beloit Investors, LLC", "issuerStreet": "12377 MERIT DRIVE, SUITE 500", "issuerCity": 
+
+✅ [200] /crowdfunding-offerings-latest  
+   📝 群眾募資
+   ⇢ list[100] × dict(48 fields):
+   欄位: ['cik', 'companyName', 'date', 'filingDate', 'acceptedDate', 'formType', 'formSignification', 'nameOfIssuer', 'legalStatusForm', 'jurisdictionOrganization', 'issuerStreet', 'issuerCity', 'issuerStateOrCountry', 'issuerZipCode', 'issuerWebsite', 'intermediaryCompanyName', 'intermediaryCommissionCik', 'intermediaryCommissionFileNumber', 'compensationAmount', 'financialInterest', 'securityOfferedType', 'securityOfferedOtherDescription', 'numberOfSecurityOffered', 'offeringPrice', 'offeringAmount']...
+   第一筆例: {"cik": "0002010670", "companyName": "Finlete Funding, Inc.", "date": "12-19-2023", "filingDate": "2026-06-30 00:00:00", "acceptedDate": "2026-06-30 11:46:44", "formType": "C-U", "formSignification": "Progress Update", "nameOfIssuer": "Finlete Funding, Inc.", "legalStatusForm": "Corporation", "jurisdictionOrganization": "DE", "issuerStreet": "100 P
+
+======================================================================
+📰 新聞
+======================================================================
+
+✅ [200] /news/stock  symbols=NVDA limit=3
+   📝 個股新聞
+   ⇢ list[3] × dict(8 fields):
+   欄位: ['symbol', 'publishedDate', 'publisher', 'title', 'image', 'site', 'text', 'url']
+   第一筆例: {"symbol": "NVDA", "publishedDate": "2026-06-30 11:48:12", "publisher": "Invezz", "title": "Nvidia stock still below $200 mark: what's behind the recent underperformance?", "image": "https://images.financialmodelingprep.com/news/nvidia-stock-still-below-200-mark-whats-behind-the-20260630.jpg", "site": "invezz.com", "text": "Nvidia (NVDA) stock rose
+
+✅ [200] /news/general-latest  limit=3
+   📝 綜合新聞
+   ⇢ list[3] × dict(8 fields):
+   欄位: ['symbol', 'publishedDate', 'publisher', 'title', 'image', 'site', 'text', 'url']
+   第一筆例: {"symbol": null, "publishedDate": "2026-06-30 12:08:00", "publisher": "WSJ", "title": "Egg Producers Manipulated Market, Keeping Prices High, Say Antitrust Authorities", "image": "https://images.financialmodelingprep.com/news/egg-producers-manipulated-market-keeping-prices-high-say-antitrust-20260630.jpg", "site": "wsj.com", "text": "Companies agre
+
+❌ [402] /news/press-releases  symbols=NVDA limit=3
+   📝 公司發稿
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+✅ [200] /fmp-articles  limit=3
+   📝 FMP 自家分析文
+   ⇢ list[3] × dict(8 fields):
+   欄位: ['title', 'date', 'content', 'tickers', 'image', 'link', 'author', 'site']
+   第一筆例: {"title": "TFI International (NYSE: TFII) Stock Gains Momentum with Analyst Upgrades and Strong Buy Rating", "date": "2026-06-30 15:04:11", "content": "<ul>\n<li>Analyst firm CIBC maintained an \"Outperform\" rating for <a href=\"https://site.financialmodelingprep.com/financial-summary/TFII\">TFI International (NYSE: TFII)</a> and raised its price 
+
+======================================================================
+📑 COT 期貨持倉
+======================================================================
+
+❌ [402] /commitment-of-traders-list  
+   📝 COT 商品清單
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /commitment-of-traders-report  symbol=GC from=2025-12-01
+   📝 黃金 COT
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /commitment-of-traders-analysis  symbol=GC from=2025-12-01
+   📝 黃金 COT 分析 ⭐
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+======================================================================
+🌐 其他資產
+======================================================================
+
+✅ [200] /cryptocurrency-list  
+   📝 加密幣清單
+   ⇢ list[4785] × dict(6 fields):
+   欄位: ['symbol', 'name', 'exchange', 'icoDate', 'circulatingSupply', 'totalSupply']
+   第一筆例: {"symbol": "MIOTAUSD", "name": "IOTA USD", "exchange": "CCC", "icoDate": "2017-11-09", "circulatingSupply": 4232705124, "totalSupply": 4788606639}
+
+✅ [200] /forex-list  
+   📝 外匯清單
+   ⇢ list[1545] × dict(5 fields):
+   欄位: ['symbol', 'fromCurrency', 'toCurrency', 'fromName', 'toName']
+   第一筆例: {"symbol": "ARSMXN", "fromCurrency": "ARS", "toCurrency": "MXN", "fromName": "Argentine Peso", "toName": "Mexican Peso"}
+
+✅ [200] /commodities-list  
+   📝 商品清單
+   ⇢ list[40] × dict(5 fields):
+   欄位: ['symbol', 'name', 'exchange', 'tradeMonth', 'currency']
+   第一筆例: {"symbol": "ZMUSD", "name": "Soybean Meal Futures", "exchange": null, "tradeMonth": "Dec", "currency": "USD"}
+
+❌ [402] /batch-commodity-quotes  
+   📝 全商品即時
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /batch-crypto-quotes  
+   📝 全加密即時
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+❌ [402] /batch-forex-quotes  
+   📝 全外匯即時
+   ⇢ [非 JSON] Restricted Endpoint: This endpoint is not available under your current subscription please visit our subscription page t
+
+======================================================================
+🔍 篩選器
+======================================================================
+
+✅ [200] /company-screener  marketCapMoreThan=100000000000 limit=5
+   📝 公司篩選(市值 > 1000 億)
+   ⇢ list[5] × dict(15 fields):
+   欄位: ['symbol', 'companyName', 'marketCap', 'sector', 'industry', 'beta', 'price', 'lastAnnualDividend', 'volume', 'exchange', 'exchangeShortName', 'country', 'isEtf', 'isFund', 'isActivelyTrading']
+   第一筆例: {"symbol": "NVDA", "companyName": "NVIDIA Corporation", "marketCap": 4806899660000, "sector": "Technology", "industry": "Semiconductors", "beta": 2.202, "price": 198.46, "lastAnnualDividend": 0.28, "volume": 52197122, "exchange": "NASDAQ Global Select", "exchangeShortName": "NASDAQ", "country": "US", "isEtf": false, "isFund": false, "isActivelyTrad
+
+✅ [200] /stock-list  
+   📝 全市場代號
+   ⇢ list[38416] × dict(2 fields):
+   欄位: ['symbol', 'companyName']
+   第一筆例: {"symbol": "RIVT", "companyName": "Riviera Tool Company"}
+
+✅ [200] /actively-trading-list  
+   📝 活躍交易股
+   ⇢ list[26055] × dict(2 fields):
+   欄位: ['symbol', 'name']
+   第一筆例: {"symbol": "USAX", "name": "Tradr 2X Long USAR Daily ETF"}
+
+✅ [200] /delisted-companies  
+   📝 下市公司
+   ⇢ list[100] × dict(5 fields):
+   欄位: ['symbol', 'companyName', 'exchange', 'ipoDate', 'delistedDate']
+   第一筆例: {"symbol": "1623.TW", "companyName": "Ta Tun Electric Wire & Cable Co Ltd", "exchange": "TAI", "ipoDate": "2026-01-22", "delistedDate": "2026-06-29"}
+
+
+=== 總計: ✅ 94  ❌ 31  / 125 ===

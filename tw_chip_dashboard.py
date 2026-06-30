@@ -266,23 +266,27 @@ def main():
                               "籌碼分","訊號"] if c in df.columns]
         rest = [c for c in df.columns if c not in front]
         df = df[front + rest]
-    df = df.sort_values("籌碼分", ascending=False)
+    if "籌碼分" in df.columns:
+        df = df.sort_values("籌碼分", ascending=False)
 
-    # 各分頁
+    # 各分頁 (sort 欄位缺失時不排序, 避免 Sponsor 層級資料缺漏)
+    def safe_sort(d, col, **kw):
+        return d.sort_values(col, **kw) if col in d.columns else d
+
     inv_sheet = df[[c for c in ["代號","名稱","評等","外資90d淨","投信90d淨","自營90d淨","三大90d淨","訊號"] if c in df.columns]].copy()
-    inv_sheet = inv_sheet.sort_values("三大90d淨", ascending=False, na_position="last")
+    inv_sheet = safe_sort(inv_sheet, "三大90d淨", ascending=False, na_position="last")
 
     sh_sheet = df[[c for c in ["代號","名稱","評等","外資持股%","外資持股Δpp","外資餘額%"] if c in df.columns]].copy()
-    sh_sheet = sh_sheet.sort_values("外資持股Δpp", ascending=False, na_position="last")
+    sh_sheet = safe_sort(sh_sheet, "外資持股Δpp", ascending=False, na_position="last")
 
     gov_sheet = df[[c for c in ["代號","名稱","評等","八大90d淨"] if c in df.columns]].copy()
-    gov_sheet = gov_sheet.sort_values("八大90d淨", ascending=False, na_position="last")
+    gov_sheet = safe_sort(gov_sheet, "八大90d淨", ascending=False, na_position="last")
 
     mar_sheet = df[[c for c in ["代號","名稱","評等","融資餘額(張)","融資Δ%","融券餘額(張)"] if c in df.columns]].copy()
-    mar_sheet = mar_sheet.sort_values("融資Δ%", ascending=False, na_position="last")
+    mar_sheet = safe_sort(mar_sheet, "融資Δ%", ascending=False, na_position="last")
 
     lend_sheet = df[[c for c in ["代號","名稱","評等","借券90d量","借券最新日"] if c in df.columns]].copy()
-    lend_sheet = lend_sheet.sort_values("借券90d量", ascending=False, na_position="last")
+    lend_sheet = safe_sort(lend_sheet, "借券90d量", ascending=False, na_position="last")
 
     # 警戒名單(處置 + 暫停, 跟 watchlist 交叉)
     watch_set = set(str(c) for c in codes)

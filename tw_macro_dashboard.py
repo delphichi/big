@@ -223,6 +223,26 @@ def main():
         })
         sheets["台指VIX"] = vix.tail(500)
 
+    # ─── 7. 台灣資通訊出口 (全球科技股 3 週領先指標) ───
+    # 用既有 tw_export_fetcher.py 三層 fallback (財政部 → OECD → 新聞)
+    print("抓台灣資通訊出口...")
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("tw_export_fetcher", "tw_export_fetcher.py")
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        exp_results = m.fetch_all() or []
+        for d in exp_results[:1]:  # 只取主源
+            num = d.get("出口總值(百萬美元)") or d.get("出口指數(2015=100)")
+            rows.append({
+                "信號": "🚢 台灣出口 ICT",
+                "數值": num,
+                "額外": f"{d.get('源','')} / {d.get('月份','')}",
+                "判讀": "🟢領先指標(全球科技 3 週)",
+                "更新日期": d.get("月份", "—"),
+            })
+    except Exception as e:
+        print(f"  ⚠️ ICT 出口失敗: {e}")
+
     # ─── 輸出 ───
     df = pd.DataFrame(rows)
     os.makedirs("data", exist_ok=True)

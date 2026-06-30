@@ -98,12 +98,22 @@ def fiscal_year_label(date_str, median_month):
     return str(y)
 
 
+def fetch_growth(sym):
+    """抓 FMP 已算好的成長率
+    1y YoY: revenueGrowth/netIncomeGrowth/freeCashFlowGrowth (總額)
+    3y/5y/10y: per-share 累計(處理過拆分 + fiscal year)
+    """
+    g = get("financial-growth", symbol=sym, period="annual", limit=1)
+    return g[0] if g and isinstance(g, list) and g else None
+
+
 def fetch_one(sym):
     """抓單一公司財報, 按年份過濾"""
     try:
         inc = get("income-statement", symbol=sym, period="annual", limit=FETCH_LIMIT) or []
         cf  = get("cash-flow-statement", symbol=sym, period="annual", limit=FETCH_LIMIT) or []
         bs  = get("balance-sheet-statement", symbol=sym, period="annual", limit=FETCH_LIMIT) or []
+        growth = fetch_growth(sym)
         if not inc: return sym, None
 
         # 看這檔的月份中位數(用 INC 算就好, 三表一致)
@@ -153,6 +163,9 @@ def fetch_one(sym):
             tl = r.get("totalLiabilities") or r.get("totalDebt")
             if ta and tl:
                 out[y]["負債比%"] = round(tl/ta * 100, 1)
+        # 把 FMP 已算好的成長率塞到 special key, 概覽會用
+        if growth:
+            out["__growth__"] = growth
         return sym, out
     except Exception:
         return sym, None
@@ -247,6 +260,41 @@ def main():
         nm_delta = round(nm_end - nm_start, 1) if nm_end is not None and nm_start is not None else None
         fc_ratio = round(fcf_e/ni_e*100, 0) if fcf_e and ni_e and ni_e > 0 else None
 
+        # FMP 已算好的成長率(financial-growth)
+        g = data.get("__growth__") or {}
+        def cumul_to_cagr(c, n):
+            if c is None: return None
+            try:
+                if (1 + float(c)) <= 0: return None
+                return round(((1 + float(c)) ** (1/n) - 1) * 100, 1)
+            except: return None
+        def pct(c):
+            if c is None: return None
+            try: return round(float(c) * 100, 1)
+            except: return None
+
+        # 1y YoY (FMP, 總額基礎, 跟自算同單位)
+        f_rev1 = pct(g.get("revenueGrowth"))
+        f_ni1  = pct(g.get("netIncomeGrowth"))
+        f_fcf1 = pct(g.get("freeCashFlowGrowth"))
+        f_eps1 = pct(g.get("epsgrowth"))
+        # 3y/5y/10y (FMP, per-share 累計 → CAGR%)
+        f_rev3 = cumul_to_cagr(g.get("threeYRevenueGrowthPerShare"), 3)
+        f_rev5 = cumul_to_cagr(g.get("fiveYRevenueGrowthPerShare"),  5)
+        f_rev10= cumul_to_cagr(g.get("tenYRevenueGrowthPerShare"),  10)
+        f_ni3  = cumul_to_cagr(g.get("threeYNetIncomeGrowthPerShare"), 3)
+        f_ni5  = cumul_to_cagr(g.get("fiveYNetIncomeGrowthPerShare"),  5)
+        f_ni10 = cumul_to_cagr(g.get("tenYNetIncomeGrowthPerShare"),  10)
+        f_ocf3 = cumul_to_cagr(g.get("threeYOperatingCFGrowthPerShare"), 3)
+        f_ocf5 = cumul_to_cagr(g.get("fiveYOperatingCFGrowthPerShare"),  5)
+        f_ocf10= cumul_to_cagr(g.get("tenYOperatingCFGrowthPerShare"),  10)
+        f_div3 = cumul_to_cagr(g.get("threeYDividendperShareGrowthPerShare"), 3)
+        f_div5 = cumul_to_cagr(g.get("fiveYDividendperShareGrowthPerShare"),  5)
+        f_div10= cumul_to_cagr(g.get("tenYDividendperShareGrowthPerShare"),  10)
+        f_eq3  = cumul_to_cagr(g.get("threeYShareholdersEquityGrowthPerShare"), 3)
+        f_eq5  = cumul_to_cagr(g.get("fiveYShareholdersEquityGrowthPerShare"),  5)
+        f_eq10 = cumul_to_cagr(g.get("tenYShareholdersEquityGrowthPerShare"),  10)
+
         overview.append({
             "代號": sym,
             "起年": START_YEAR, "迄年": END_YEAR,
@@ -257,10 +305,18 @@ def main():
             f"{END_YEAR}研發(億)": to_billions(data.get(Y_end, {}).get("研發")),
             f"{END_YEAR}庫存(億)": to_billions(data.get(Y_end, {}).get("庫存")),
             f"{END_YEAR}負債比%": data.get(Y_end, {}).get("負債比%"),
-            # 三大成長率 × 4 期間
-            "營收10y%": gc(rev, 10), "營收5y%": gc(rev, 5), "營收3y%": gc(rev, 3), "營收1y%": y1(rev),
-            "淨利10y%": gc(ni, 10),  "淨利5y%": gc(ni, 5),  "淨利3y%": gc(ni, 3),  "淨利1y%": y1(ni),
-            "FCF10y%":  gc(fcf, 10), "FCF5y%":  gc(fcf, 5), "FCF3y%":  gc(fcf, 3), "FCF1y%":  y1(fcf),
+            # ─── 自算: 總額基礎 CAGR(年度資料相除)───
+            "營收10y%自": gc(rev, 10), "營收5y%自": gc(rev, 5), "營收3y%自": gc(rev, 3), "營收1y%自": y1(rev),
+            "淨利10y%自": gc(ni, 10),  "淨利5y%自": gc(ni, 5),  "淨利3y%自": gc(ni, 3),  "淨利1y%自": y1(ni),
+            "FCF10y%自":  gc(fcf, 10), "FCF5y%自":  gc(fcf, 5), "FCF3y%自":  gc(fcf, 3), "FCF1y%自":  y1(fcf),
+            # ─── FMP: 1y 總額 / 3-10y per-share CAGR ───
+            "營收10y%": f_rev10, "營收5y%": f_rev5, "營收3y%": f_rev3, "營收1y%": f_rev1,
+            "淨利10y%": f_ni10,  "淨利5y%": f_ni5,  "淨利3y%": f_ni3,  "淨利1y%": f_ni1,
+            "OCF10y%":  f_ocf10, "OCF5y%":  f_ocf5, "OCF3y%":  f_ocf3, "FCF1y%":  f_fcf1,
+            "EPS1y%": f_eps1,
+            "股利10y%": f_div10, "股利5y%": f_div5, "股利3y%": f_div3,
+            "權益10y%": f_eq10,  "權益5y%": f_eq5,  "權益3y%": f_eq3,
+            # ─── 品質指標 ───
             "淨利率%": nm_end, "淨利率Δpp": nm_delta, "FCF/NI%": fc_ratio,
         })
 
@@ -270,7 +326,9 @@ def main():
         front = ["代號","名稱","產業","評等","品質總分"]
         rest = [c for c in ov.columns if c not in front]
         ov = ov[front + rest]
-    ov = ov.sort_values("營收3y%", ascending=False, na_position="last")
+    # 排序: 優先用 FMP 的 3y CAGR, fallback 用自算
+    sort_col = "營收3y%" if "營收3y%" in ov.columns else "營收3y%自"
+    ov = ov.sort_values(sort_col, ascending=False, na_position="last")
 
     os.makedirs("data", exist_ok=True)
     with pd.ExcelWriter(DST, engine="openpyxl") as xw:
@@ -284,8 +342,9 @@ def main():
 
     print(f"\n→ 已輸出 {DST}")
     print(f"分頁: 概覽 + {' / '.join(metrics)}")
-    print(f"\n=== 營收 3y CAGR TOP 15 ({START_YEAR}~{END_YEAR}) ===")
-    cols_show = [c for c in ["代號","名稱","評等","營收5y%","營收3y%","營收1y%","淨利3y%","FCF3y%","淨利率Δpp","FCF/NI%"] if c in ov.columns]
+    print(f"\n=== 營收 3y CAGR TOP 15 (FMP per-share, {START_YEAR}~{END_YEAR}) ===")
+    cols_show = [c for c in ["代號","名稱","評等","營收5y%","營收3y%","營收1y%",
+                              "淨利3y%","EPS1y%","淨利率Δpp","FCF/NI%"] if c in ov.columns]
     print(ov[cols_show].head(15).to_string(index=False))
 
 

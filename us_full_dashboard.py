@@ -77,13 +77,16 @@ def fetch_one(sym):
     try:
         out = {"代號": sym}
 
-        # ─── 1. 報價 ───
+        # ─── 1. 報價 + profile (拿 sector 判斷金融業 Z-Score 失真) ───
         q = first(get("quote", symbol=sym)) or {}
         price = q.get("price")
         out["當前股價"] = price
         out["市值(億美)"] = round(q.get("marketCap", 0) / 1e8, 0) if q.get("marketCap") else None
         out["52w高"] = q.get("yearHigh")
         out["52w低"] = q.get("yearLow")
+        prof = first(get("profile", symbol=sym)) or {}
+        out["__sector"] = prof.get("sector", "") or ""
+        out["__industry"] = prof.get("industry", "") or ""
 
         # ─── 2. DCF 估值雷達 ───
         dcf = first(get("discounted-cash-flow", symbol=sym)) or {}
@@ -149,17 +152,30 @@ def fetch_one(sym):
                 out["__geo_data"] = gs_data
                 out["__geo_year"] = gs.get("fiscalYear")
 
-        # ─── 7. 內部人交易統計(最新季)===
+        # ─── 7. 內部人交易統計(最新 4 季合計, 避免單季 0 失真)===
         ins_stats = get("insider-trading/statistics", symbol=sym) or []
-        latest = ins_stats[0] if isinstance(ins_stats, list) and ins_stats else {}
-        if latest:
+        if isinstance(ins_stats, list) and ins_stats:
+            latest = ins_stats[0]
+            recent4 = ins_stats[:4]
             out["內部人季度"] = f"{latest.get('year')}Q{latest.get('quarter')}"
             out["內部人買筆"] = latest.get("acquiredTransactions")
             out["內部人賣筆"] = latest.get("disposedTransactions")
-            out["內部人買量"] = latest.get("totalAcquired")
-            out["內部人賣量"] = latest.get("totalDisposed")
-            ratio = latest.get("acquiredDisposedRatio")
-            out["內部人買賣比"] = round(ratio, 3) if ratio is not None else None
+            # 4 季合計買 / 4 季合計賣
+            t_acq = sum((r.get("totalAcquired") or 0) for r in recent4)
+            t_dis = sum((r.get("totalDisposed") or 0) for r in recent4)
+            n_acq = sum((r.get("acquiredTransactions") or 0) for r in recent4)
+            n_dis = sum((r.get("disposedTransactions") or 0) for r in recent4)
+            out["內部人4Q買量"] = t_acq
+            out["內部人4Q賣量"] = t_dis
+            out["內部人4Q買筆"] = n_acq
+            out["內部人4Q賣筆"] = n_dis
+            # 4 季買賣比(用量, 比單季的「ratio」更穩)
+            if t_dis > 0:
+                out["內部人買賣比"] = round(t_acq / t_dis, 3)
+            elif t_acq > 0:
+                out["內部人買賣比"] = 99.0  # 全部買, 沒賣
+            else:
+                out["內部人買賣比"] = None  # 4 季全 0, 真的沒交易
 
         # ─── 8. 國會交易 (最新 5 筆) ===
         sen = get("senate-trades", symbol=sym) or []
@@ -168,51 +184,96 @@ def fetch_one(sym):
         hou_list = hou[:5] if isinstance(hou, list) else []
         out["__senate"] = sen_list
         out["__house"] = hou_list
-        # 過去 90 天國會交易筆數
+        # 過去 90 天國會交易筆數 + 「強訊號」判斷(同向 >= 3 筆)
         from datetime import datetime, timedelta
         cutoff = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
         sen_recent = [t for t in (sen if isinstance(sen, list) else [])
                       if t.get("transactionDate", "") >= cutoff]
         hou_recent = [t for t in (hou if isinstance(hou, list) else [])
                       if t.get("transactionDate", "") >= cutoff]
-        out["國會90d買"] = sum(1 for t in sen_recent + hou_recent if t.get("type", "").lower() in ("purchase","buy"))
-        out["國會90d賣"] = sum(1 for t in sen_recent + hou_recent if t.get("type", "").lower() in ("sale","sell"))
+        all_recent = sen_recent + hou_recent
+        g_buy = sum(1 for t in all_recent if t.get("type", "").lower() in ("purchase","buy"))
+        g_sell = sum(1 for t in all_recent if t.get("type", "").lower() in ("sale","sell"))
+        out["國會90d買"] = g_buy
+        out["國會90d賣"] = g_sell
+        # 強訊號: 同向 >= 3 筆 (買賣比 >= 3:1)
+        if g_buy >= 3 and g_buy >= g_sell * 3:
+            out["國會強訊號"] = "強買"
+        elif g_sell >= 3 and g_sell >= g_buy * 3:
+            out["國會強訊號"] = "強賣"
+        else:
+            out["國會強訊號"] = None
 
         return sym, out
     except Exception as e:
         return sym, {"代號": sym, "__error": str(e)}
 
 
+FIN_SECTORS = {"Financial Services", "Financials", "Real Estate"}
+
+
+def is_financial(row):
+    """金融業 / REIT — Altman Z 對這類失真, 不採用"""
+    s = (row.get("__sector") or "").strip()
+    ind = (row.get("__industry") or "").lower()
+    if s in FIN_SECTORS: return True
+    if any(k in ind for k in ["bank", "insur", "reit", "capital market", "asset management"]):
+        return True
+    return False
+
+
 def composite_signal(row):
-    """綜合訊號: DCF + 體質 + 內部人"""
+    """綜合訊號: DCF + 體質 + 內部人 + 國會
+    Fix v2:
+    - DCF 只採信 10% < d < 100% 區間(極端值可能 model 失真)
+    - 金融業/REIT 不採 Altman Z(該模型對它們失真)
+    - 內部人買賣比用 4 季合計
+    - 國會強訊號 (3+ 筆同向)
+    """
     score = 0; tags = []
-    # DCF
+
+    # DCF — 過濾極端值 (FMP 對現金充沛大型股太樂觀 / 對高成長股太悲觀)
     d = row.get("DCF差%")
     if d is not None:
-        if d > 30: score += 2; tags.append("💎深度低估")
-        elif d > 10: score += 1; tags.append("🟢低估")
-        elif d < -30: score -= 2; tags.append("🔴深度高估")
-        elif d < -10: score -= 1; tags.append("🟠高估")
-    # Altman Z
+        if 30 < d <= 100: score += 2; tags.append("💎深度低估")
+        elif 100 < d <= 300: score += 1; tags.append("💎*低估(數據樂觀)")
+        elif d > 300: tags.append("💎?DCF失真")  # 不計分, 只標
+        elif 10 < d <= 30: score += 1; tags.append("🟢低估")
+        elif -30 <= d < -10: score -= 1; tags.append("🟠高估")
+        elif -100 < d < -30: score -= 2; tags.append("🔴深度高估")
+        elif d <= -100: tags.append("🔴*極端高估")  # 不額外扣, 已扣過
+
+    # Altman Z — 金融業略過
     z = row.get("AltmanZ")
-    if z is not None:
+    fin = is_financial(row)
+    if fin:
+        tags.append("🏦金融業")  # 標記但不算 Z
+    elif z is not None:
         if z >= 3: score += 1
         elif z < 1.8: score -= 2; tags.append("💀破產風險")
+
     # Piotroski
     p = row.get("Piotroski")
     if p is not None:
         if p >= 8: score += 1; tags.append("🟢體質強")
         elif p <= 3: score -= 1; tags.append("🟠體質弱")
-    # 內部人
+
+    # 內部人 (用 4 季合計買賣比)
     r = row.get("內部人買賣比")
     if r is not None:
         if r >= 1: score += 1; tags.append("👤內部人淨買")
         elif r < 0.1: score -= 1; tags.append("⚠️內部人大賣")
-    # 國會
-    g_buy = row.get("國會90d買", 0) or 0
-    g_sell = row.get("國會90d賣", 0) or 0
-    if g_buy > g_sell + 2: tags.append("🏛️國會淨買")
-    elif g_sell > g_buy + 2: tags.append("🏛️國會淨賣")
+
+    # 國會強訊號 (>=3 筆同向才算)
+    sig = row.get("國會強訊號")
+    if sig == "強買": score += 1; tags.append("🏛️🟢國會強買")
+    elif sig == "強賣": score -= 1; tags.append("🏛️🔴國會強賣")
+    else:
+        g_buy = row.get("國會90d買", 0) or 0
+        g_sell = row.get("國會90d賣", 0) or 0
+        if g_buy > g_sell + 2: tags.append("🏛️國會淨買")
+        elif g_sell > g_buy + 2: tags.append("🏛️國會淨賣")
+
     return score, " ".join(tags) if tags else "—"
 
 
@@ -258,7 +319,8 @@ def main():
                  "DCF估值","DCF差%","LeveredDCF","LDCF差%",
                  "AltmanZ","Piotroski","OE/股","OE殖利率%",
                  "主產品1","主產品2","主產品3","中國營收%","台灣營收%",
-                 "內部人買賣比","國會90d買","國會90d賣","綜合分","訊號"]
+                 "內部人買賣比","內部人4Q買量","內部人4Q賣量",
+                 "國會90d買","國會90d賣","國會強訊號","綜合分","訊號"]
         rest = [c for c in df.columns if c not in front]
         df = df[[c for c in front if c in df.columns] + rest]
     df = df.sort_values("綜合分", ascending=False)
@@ -304,8 +366,11 @@ def main():
             })
     geo_sheet = pd.DataFrame(geo_rows)
 
-    # 內部人
-    ins_sheet = df[[c for c in ["代號","名稱","內部人季度","內部人買筆","內部人賣筆","內部人買量","內部人賣量","內部人買賣比"] if c in df.columns]].copy()
+    # 內部人 (用 4 季合計版本)
+    ins_sheet = df[[c for c in ["代號","名稱","內部人季度","內部人買筆","內部人賣筆",
+                                  "內部人4Q買量","內部人4Q賣量","內部人4Q買筆","內部人4Q賣筆",
+                                  "內部人買賣比"] if c in df.columns]].copy()
+    ins_sheet = ins_sheet.sort_values("內部人買賣比", ascending=False, na_position="last")
 
     # 國會交易(展開)
     cong_rows = []

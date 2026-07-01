@@ -119,16 +119,23 @@ def main():
             if c in df.columns: return c
         return None
 
-    df = source_market_value_weight()
-    weight_col = pick_col(df, ["weight_per", "weight", "TWweight"]) if not df.empty else None
+    # 主源: TaiwanStockMarketValue (真實市值, 跨市場可比)
+    df = source_market_value()
+    weight_col = pick_col(df, ["market_value", "MarketValue"]) if not df.empty else None
+    src_name = "MarketValue"
+    # 備 1: MarketValueWeight (分市場 %, 跨市場不可比但 TWSE 前段仍準)
     if df.empty or weight_col is None:
-        df = source_market_value()
-        weight_col = pick_col(df, ["MarketValue", "market_value", "value"]) if not df.empty else None
+        df = source_market_value_weight()
+        weight_col = pick_col(df, ["weight_per", "weight"]) if not df.empty else None
+        src_name = "MarketValueWeight (⚠️ 分市場權重)"
+    # 備 2: Price × Shares 自算
     if df.empty or weight_col is None:
         df = source_price_times_shares()
         weight_col = "market_value" if not df.empty else None
+        src_name = "Price×Shares 自算"
     if df.empty or weight_col is None:
         print("❌ 三源都失敗或找不到市值欄"); sys.exit(1)
+    print(f"排序欄: {weight_col} (源: {src_name})")
 
     print(f"\n原始 {len(df)} 筆, 用 {weight_col} 排序")
 

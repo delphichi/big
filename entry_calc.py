@@ -46,7 +46,9 @@ def calc(tp, sl, price):
     downside = round((sl / price - 1) * 100, 1) if price else None
     actual_ratio = (tp - price) / (price - sl) if price and price > sl else None
 
-    if price and price <= max_entry:
+    if price and price <= sl:
+        verdict = "🚨 已破止損(SL 失守, 重新評估支撐)"
+    elif price and price <= max_entry:
         verdict = "🟢 進場區(盈虧比 >= 3:1)"
     elif price and price <= max_entry * 1.05:
         verdict = "🟡 接近門檻(<5% 距離)"
@@ -181,11 +183,15 @@ def batch_us():
 
     # 顯示 進場區 + 接近門檻
     good = df[df["判讀"].str.contains("🟢|🟡", na=False)]
+    broken = df[df["判讀"].str.contains("🚨", na=False)]
     print(f"\n=== 🟢🟡 進場區 / 接近門檻 ({len(good)} 檔) ===")
     cols = ["代號","現價","SL","TP","Max Entry","實際盈虧比","上檔 %","判讀"]
     print(good[cols].to_string(index=False))
+    if len(broken):
+        print(f"\n=== 🚨 已破止損 ({len(broken)} 檔) — 需重新評估支撐 ===")
+        print(broken[cols].to_string(index=False))
 
-    _write_email("us", good, cols)
+    _write_email("us", good, cols, broken)
 
 
 def batch_tw():
@@ -220,23 +226,31 @@ def batch_tw():
     print(f"→ {dst}")
 
     good = df[df["判讀"].str.contains("🟢|🟡", na=False)]
+    broken = df[df["判讀"].str.contains("🚨", na=False)]
     print(f"\n=== 🟢🟡 進場區 / 接近門檻 ({len(good)} 檔) ===")
     cols = ["代號","現價","SL","TP","Max Entry","實際盈虧比","判讀"]
     print(good[cols].to_string(index=False))
+    if len(broken):
+        print(f"\n=== 🚨 已破止損 ({len(broken)} 檔) — 需重新評估支撐 ===")
+        print(broken[cols].to_string(index=False))
 
-    _write_email("tw", good, cols)
+    _write_email("tw", good, cols, broken)
 
 
-def _write_email(market, good, cols):
+def _write_email(market, good, cols, broken=None):
     """產出 /tmp/entry_signals_{market}_subject.txt + _body.html
-    有 🟢🟡 才寫 subject → workflow 用來判斷是否寄信
+    有 🟢🟡 或 🚨 才寫 subject → workflow 用來判斷是否寄信
     """
     label = "美股" if market == "us" else "台股"
-    if len(good) == 0:
-        print(f"⚠️ {label} 無 🟢🟡 進場區檔, 不產 email")
+    broken_n = len(broken) if broken is not None else 0
+    if len(good) == 0 and broken_n == 0:
+        print(f"⚠️ {label} 無 🟢🟡🚨 檔, 不產 email")
         return
 
-    subject = f"🎯 {label} 3:1 入場清單 — {len(good)} 檔進場區/接近門檻"
+    subject_parts = []
+    if len(good): subject_parts.append(f"{len(good)} 進場區/接近")
+    if broken_n:  subject_parts.append(f"{broken_n} 已破損")
+    subject = f"🎯 {label} 3:1 入場清單 — {' + '.join(subject_parts)}"
     with open(f"/tmp/entry_signals_{market}_subject.txt", "w", encoding="utf-8") as f:
         f.write(subject)
 
@@ -258,6 +272,12 @@ def _write_email(market, good, cols):
 <h3>🟡 接近門檻 ({len(yellow)} 檔) — 距 Max Entry &lt;5%, 可掛限價單</h3>
 {yellow[cols].to_html(index=False, escape=False) if len(yellow) else '<p>無</p>'}
 </div>
+
+{f'''<div style="background:#fee;padding:10px;border-left:4px solid #c33;margin-top:12px">
+<h3>🚨 已破止損 ({broken_n} 檔) — 現價已跌破 SL, 原設定失效</h3>
+{broken[cols].to_html(index=False, escape=False)}
+<p style="color:#c33;font-size:12px"><b>處理</b>: 不能再用原 SL/TP; 需重新找更低的支撐或直接排除</p>
+</div>''' if broken_n else ''}
 
 <div style='background:#f5f5ff;padding:12px;border-left:4px solid #55b;font-size:13px;margin-top:16px'>
 <h4>📖 用法說明</h4>

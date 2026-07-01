@@ -129,13 +129,30 @@ def detect_flips(cur_map, prev_map):
         cur_sell = cur.get("國會90d賣", 0) or 0
         cur_net = cur_buy - cur_sell
 
-        # 極端內部人賣壓 + 國會也賣 → 雙重減碼訊號
-        if cur_r is not None and cur_r < 0.1 and cur_net <= -3:
-            events.append(f"🚨 內外雙賣(內部人比 {cur_r} + 國會淨 {cur_net})")
+        # 1. 極端內部人單邊 (無需國會)
+        if cur_r is not None:
+            if cur_r < 0.05:  # 內部人 4Q 買量幾乎為 0
+                events.append(f"🔴 極端內部人賣壓(4Q 買賣比 {cur_r})")
+                severity += 2
+            elif cur_r > 5:  # 內部人瘋狂淨買
+                events.append(f"🟢 極端內部人淨買(4Q 買賣比 {cur_r})")
+                severity += 2
+
+        # 2. 國會強訊號 (無需內部人)
+        if cur_sig == "強賣":
+            events.append(f"🔴 國會強賣({cur_buy}買/{cur_sell}賣)")
+            severity += 2
+        elif cur_sig == "強買":
+            events.append(f"🟢 國會強買({cur_buy}買/{cur_sell}賣)")
+            severity += 2
+
+        # 3. 內外雙賣 (bonus 加分)
+        if cur_r is not None and cur_r < 0.15 and cur_net <= -2:
+            events.append(f"🚨 內外一致減碼")
             severity += 3
-        # 極端內部人買 + 國會也買
-        elif cur_r is not None and cur_r > 3 and cur_net >= 3:
-            events.append(f"🚨 內外雙買(內部人比 {cur_r} + 國會淨 +{cur_net})")
+        # 內外雙買
+        elif cur_r is not None and cur_r > 2 and cur_net >= 2:
+            events.append(f"🚨 內外一致加碼")
             severity += 3
 
         # ═══ Delta 訊號 (需要 prev) ═══
@@ -289,6 +306,18 @@ def main():
             for _, r in six.iterrows():
                 six_map[r["代號"]] = f"{r.get('評等','')} 分{r.get('六維分','')}"
         except: pass
+
+    # 診斷: 印分布給 user 看實際數值
+    ratios = [r.get("內部人買賣比") for r in results.values() if r.get("內部人買賣比") is not None]
+    congress_sigs = [r.get("國會強訊號") for r in results.values() if r.get("國會強訊號")]
+    if ratios:
+        ratios.sort()
+        print(f"📊 內部人買賣比分布: min={ratios[0]:.2f} / 25%={ratios[len(ratios)//4]:.2f} "
+              f"/ 中位={ratios[len(ratios)//2]:.2f} / max={ratios[-1]:.2f} (共 {len(ratios)} 檔有資料)")
+        print(f"   < 0.05 極端賣: {sum(1 for r in ratios if r < 0.05)} 檔")
+        print(f"   < 0.15 低: {sum(1 for r in ratios if r < 0.15)} 檔")
+        print(f"   > 5 極端買: {sum(1 for r in ratios if r > 5)} 檔")
+    print(f"📊 國會強訊號: {congress_sigs.count('強買')} 強買 / {congress_sigs.count('強賣')} 強賣")
 
     # 偵測翻轉
     prev = load_prev()

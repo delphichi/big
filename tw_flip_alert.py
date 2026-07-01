@@ -96,48 +96,64 @@ def compute_radar(sid):
 
 
 def detect_flips(cur_map, prev_map):
-    """偵測嚴格翻轉訊號"""
+    """偵測翻轉訊號 (絕對狀態 + delta 二類, 絕對狀態不需要 prev)"""
     flips = []
     for sid, cur in cur_map.items():
-        prev = prev_map.get(sid)
-        if not prev: continue
-
         cur_f5 = cur.get("外資5d", 0) or 0
-        prv_f5 = prev.get("外資5d", 0) or 0
         cur_f20 = cur.get("外資20d", 0) or 0
-        prv_f20 = prev.get("外資20d", 0) or 0
         cur_f60 = cur.get("外資60d", 0) or 0
 
         events = []; severity = 0
 
-        # 5d 由正翻負 (逆轉幅度必須夠大)
-        if prv_f5 > 0 and cur_f5 < 0 and abs(cur_f5 - prv_f5) > FLIP_5D_REVERSE * 1000:
-            events.append("🔴 5d 翻紅"); severity += 2
-        # 5d 由負翻正
-        elif prv_f5 < 0 and cur_f5 > 0 and abs(cur_f5 - prv_f5) > FLIP_5D_REVERSE * 1000:
-            events.append("🟢 5d 翻綠"); severity += 2
+        # ═══ 絕對狀態訊號 (首次跑也能觸發) ═══
 
-        # 20d 單日巨變 (超過門檻)
-        d20_change = cur_f20 - prv_f20
-        if abs(d20_change) >= BIG_20D_CHANGE * 1000:
-            direction = "加碼" if d20_change > 0 else "減碼"
-            emoji = "📈" if d20_change > 0 else "📉"
-            events.append(f"{emoji} 20d 巨變 ({direction} {round(d20_change/1000,0):,.0f} 千)")
-            severity += 1
+        # 三期完全不同向 (5d/20d/60d 三個方向都不一樣) → 極大訊號
+        signs = [1 if v > 0 else (-1 if v < 0 else 0) for v in (cur_f5, cur_f20, cur_f60)]
+        max_abs = max(abs(cur_f5), abs(cur_f20), abs(cur_f60))
+        if 1 in signs and -1 in signs and max_abs > 10_000_000:  # > 1 萬張
+            events.append("🚨 三期方向不一致(5d↔20d↔60d)")
+            severity += 3
 
-        # 三期同向反轉 (5d/20d/60d 都翻或都同向)
-        if cur_f5 * cur_f20 > 0 and cur_f20 * cur_f60 > 0:
-            # 三期同向, 不算 flip
-            pass
-        elif cur_f5 * cur_f20 < 0 and abs(cur_f5) > 1000 * 1000:
-            events.append("🚨 5d 與 20d 方向背離")
-            severity += 1
+        # 5d 與 20d 背離 (短期反轉中期趨勢)
+        if cur_f5 * cur_f20 < 0 and max(abs(cur_f5), abs(cur_f20)) > 5_000_000:
+            direction = "由買轉賣" if cur_f5 < 0 else "由賣轉買"
+            events.append(f"🚨 5d↔20d 背離({direction})")
+            severity += 2
+
+        # 20d 與 60d 背離 (中期已在反轉長期趨勢)
+        if cur_f20 * cur_f60 < 0 and max(abs(cur_f20), abs(cur_f60)) > 10_000_000:
+            direction = "由買轉賣" if cur_f20 < 0 else "由賣轉買"
+            events.append(f"🚨 20d↔60d 背離({direction})")
+            severity += 2
+
+        # ═══ Delta 訊號 (需要 prev 才能算) ═══
+        prev = prev_map.get(sid)
+        if prev:
+            prv_f5 = prev.get("外資5d", 0) or 0
+            prv_f20 = prev.get("外資20d", 0) or 0
+
+            # 5d 由正翻負
+            if prv_f5 > 0 and cur_f5 < 0 and abs(cur_f5 - prv_f5) > FLIP_5D_REVERSE * 1000:
+                events.append("🔴 5d 翻紅"); severity += 2
+            # 5d 由負翻正
+            elif prv_f5 < 0 and cur_f5 > 0 and abs(cur_f5 - prv_f5) > FLIP_5D_REVERSE * 1000:
+                events.append("🟢 5d 翻綠"); severity += 2
+
+            # 20d 單日巨變
+            d20_change = cur_f20 - prv_f20
+            if abs(d20_change) >= BIG_20D_CHANGE * 1000:
+                direction = "加碼" if d20_change > 0 else "減碼"
+                emoji = "📈" if d20_change > 0 else "📉"
+                events.append(f"{emoji} 20d 巨變({direction} {round(d20_change/1000,0):,.0f} 千)")
+                severity += 1
 
         if events:
             flips.append({
                 "代號": sid, "訊號": " / ".join(events), "嚴重度": severity,
-                "外資5d(今)": cur_f5, "外資5d(昨)": prv_f5,
-                "外資20d(今)": cur_f20, "外資20d(昨)": prv_f20,
+                "外資5d(今)": cur_f5,
+                "外資5d(昨)": (prev or {}).get("外資5d", None),
+                "外資20d(今)": cur_f20,
+                "外資20d(昨)": (prev or {}).get("外資20d", None),
                 "外資60d(今)": cur_f60,
             })
     return sorted(flips, key=lambda x: -x["嚴重度"])

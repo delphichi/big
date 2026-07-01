@@ -117,59 +117,73 @@ def compute(sym):
 
 
 def detect_flips(cur_map, prev_map):
-    """偵測翻轉"""
+    """偵測翻轉 (絕對狀態 + delta)"""
     flips = []
     for sym, cur in cur_map.items():
-        prev = prev_map.get(sym)
-        if not prev: continue
-
         events = []; severity = 0
 
-        # ─── 內部人 4Q 買賣比 flip ───
+        # ═══ 絕對狀態訊號 (首次跑也能觸發) ═══
         cur_r = cur.get("內部人買賣比")
-        prv_r = prev.get("內部人買賣比")
-        if cur_r is not None and prv_r is not None:
-            if prv_r >= INSIDER_FLIP_HI and cur_r < INSIDER_FLIP_LO:
-                events.append(f"🔴 內部人翻賣 ({prv_r} → {cur_r})")
-                severity += 3
-            elif prv_r < INSIDER_FLIP_LO and cur_r >= INSIDER_FLIP_HI:
-                events.append(f"🟢 內部人翻買 ({prv_r} → {cur_r})")
-                severity += 3
-            elif prv_r >= 2 and cur_r < 1:
-                events.append(f"🟠 內部人買氣減弱 ({prv_r} → {cur_r})")
-                severity += 1
-
-        # ─── 國會 90d 淨買賣 flip ───
-        cur_net = (cur.get("國會90d買", 0) or 0) - (cur.get("國會90d賣", 0) or 0)
-        prv_net = (prev.get("國會90d買", 0) or 0) - (prev.get("國會90d賣", 0) or 0)
-        if prv_net >= CONGRESS_STRONG_NET and cur_net < -1:
-            events.append(f"🔴 國會翻賣 (淨 {prv_net:+d} → {cur_net:+d})")
-            severity += 2
-        elif prv_net < -CONGRESS_STRONG_NET and cur_net > 1:
-            events.append(f"🟢 國會翻買 (淨 {prv_net:+d} → {cur_net:+d})")
-            severity += 2
-
-        # ─── 國會強訊號翻轉 ───
         cur_sig = cur.get("國會強訊號")
-        prv_sig = prev.get("國會強訊號")
-        if prv_sig == "強買" and cur_sig == "強賣":
-            events.append("🚨 國會強買→強賣")
+        cur_buy = cur.get("國會90d買", 0) or 0
+        cur_sell = cur.get("國會90d賣", 0) or 0
+        cur_net = cur_buy - cur_sell
+
+        # 極端內部人賣壓 + 國會也賣 → 雙重減碼訊號
+        if cur_r is not None and cur_r < 0.1 and cur_net <= -3:
+            events.append(f"🚨 內外雙賣(內部人比 {cur_r} + 國會淨 {cur_net})")
             severity += 3
-        elif prv_sig == "強賣" and cur_sig == "強買":
-            events.append("🚨 國會強賣→強買")
+        # 極端內部人買 + 國會也買
+        elif cur_r is not None and cur_r > 3 and cur_net >= 3:
+            events.append(f"🚨 內外雙買(內部人比 {cur_r} + 國會淨 +{cur_net})")
             severity += 3
-        elif prv_sig != cur_sig and cur_sig in ("強買","強賣"):
-            events.append(f"🆕 國會新出現 {cur_sig}")
-            severity += 1
+
+        # ═══ Delta 訊號 (需要 prev) ═══
+        prev = prev_map.get(sym)
+        if prev:
+            prv_r = prev.get("內部人買賣比")
+            # 內部人 4Q 買賣比 flip
+            if cur_r is not None and prv_r is not None:
+                if prv_r >= INSIDER_FLIP_HI and cur_r < INSIDER_FLIP_LO:
+                    events.append(f"🔴 內部人翻賣 ({prv_r} → {cur_r})")
+                    severity += 3
+                elif prv_r < INSIDER_FLIP_LO and cur_r >= INSIDER_FLIP_HI:
+                    events.append(f"🟢 內部人翻買 ({prv_r} → {cur_r})")
+                    severity += 3
+                elif prv_r >= 2 and cur_r < 1:
+                    events.append(f"🟠 內部人買氣減弱 ({prv_r} → {cur_r})")
+                    severity += 1
+
+            # 國會 90d 淨買賣 flip
+            prv_net = (prev.get("國會90d買", 0) or 0) - (prev.get("國會90d賣", 0) or 0)
+            if prv_net >= CONGRESS_STRONG_NET and cur_net < -1:
+                events.append(f"🔴 國會翻賣 (淨 {prv_net:+d} → {cur_net:+d})")
+                severity += 2
+            elif prv_net < -CONGRESS_STRONG_NET and cur_net > 1:
+                events.append(f"🟢 國會翻買 (淨 {prv_net:+d} → {cur_net:+d})")
+                severity += 2
+
+            # 國會強訊號翻轉
+            prv_sig = prev.get("國會強訊號")
+            if prv_sig == "強買" and cur_sig == "強賣":
+                events.append("🚨 國會強買→強賣")
+                severity += 3
+            elif prv_sig == "強賣" and cur_sig == "強買":
+                events.append("🚨 國會強賣→強買")
+                severity += 3
+            elif prv_sig != cur_sig and cur_sig in ("強買","強賣"):
+                events.append(f"🆕 國會新出現 {cur_sig}")
+                severity += 1
 
         if events:
             flips.append({
                 "代號": sym, "訊號": " / ".join(events), "嚴重度": severity,
-                "內部人買賣比(今)": cur_r, "內部人買賣比(昨)": prv_r,
+                "內部人買賣比(今)": cur_r,
+                "內部人買賣比(昨)": (prev or {}).get("內部人買賣比"),
                 "國會90d買": cur.get("國會90d買"),
                 "國會90d賣": cur.get("國會90d賣"),
                 "國會強訊號(今)": cur_sig,
-                "國會強訊號(昨)": prv_sig,
+                "國會強訊號(昨)": (prev or {}).get("國會強訊號"),
             })
     return sorted(flips, key=lambda x: -x["嚴重度"])
 

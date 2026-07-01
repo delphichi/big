@@ -216,6 +216,30 @@ def build_email(flips, six_map=None):
 <p style='color:#666'>每工作日跑, 只有翻轉時才寄</p>
 <p><b>{len(flips)}</b> 檔翻轉 | 🚨 嚴重 <b>{n_severe}</b> | 一般 {n_normal}</p>
 
+<div style='background:#f5f5ff;padding:12px;border-left:4px solid #55b;margin:12px 0;font-size:13px'>
+<h4 style='margin:0 0 8px 0'>⏰ 資料時效性重要提醒</h4>
+<table style='border-collapse:collapse;width:100%;font-size:12px'>
+<tr style='background:#eee'><th style='padding:4px'>資料</th><th>法定申報</th><th>實際延遲</th><th>時效性</th></tr>
+<tr><td style='padding:4px'><b>內部人 Form 4</b></td><td>交易後 2 個工作日</td><td>1-3 天</td><td>⚡ <b>接近即時</b></td></tr>
+<tr><td style='padding:4px'><b>國會 PTR</b></td><td>交易後 <b>45 天</b></td><td>平均 20-45 天</td><td>🐌 <b>看到時已 2-3 個月前</b></td></tr>
+</table>
+</div>
+
+<div style='background:#fffbe0;padding:12px;border-left:4px solid #fa0;margin:12px 0;font-size:13px'>
+<h4 style='margin:0 0 8px 0'>💡 實務用法</h4>
+<p style='margin:4px 0'><b>👤 內部人訊號 → 短中期決策</b></p>
+<ul style='margin:2px 0;padding-left:20px'>
+<li>4Q 買賣比 翻紅(1.5 → 0.05) = <b>即時警訊</b> (2-3 天內反應)</li>
+<li>適合: 決定「這週該不該減碼」</li>
+</ul>
+<p style='margin:8px 0 4px 0'><b>🏛️ 國會訊號 → 政策風向</b></p>
+<ul style='margin:2px 0;padding-left:20px'>
+<li>一群政要同時買/賣同產業 = <b>政策風向球</b> (即使有 45 天延遲)</li>
+<li>適合: 看法規、貿易政策、國防合約風向</li>
+<li>❌ <b>不適合</b>: 當單一買賣時點決策 (訊號已延遲)</li>
+</ul>
+</div>
+
 <h3 style='margin-top:20px'>⚡ 翻轉清單</h3>
 <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>
 <tr style='background:#f0f0f0'>

@@ -1,236 +1,562 @@
 # -*- coding: utf-8 -*-
 """
-單檔台股深度分析 tw_stock_deepdive.py
+台股單檔深度研究 tw_stock_deepdive.py
 =======================================================================
-用法:
-  python tw_stock_deepdive.py 2330
-  python tw_stock_deepdive.py 2330 3017 6139
+對單一台股跑 ~25 個 FinMind dataset, 整合完整研究報告
+
+抓內容:
+  1. 公司基本 (TaiwanStockInfo)
+  2. 產業鏈 (TaiwanStockIndustryChain)
+  3. 還原股價 1y/10y + PER/PBR 歷史 3y
+  4. 月營收 10Y (YoY / MoM)
+  5. 季損益/資產負債/現金流 10Y
+  6. 市值歷史
+  7. 三大法人 90d + 外資持股歷史
+  8. 八大行庫 / 融資融券 / 借券 / 股權分級
+  9. 股利歷史 + 除權除息
+  10. 拆股 / 減資
+  11. 警戒 (處置/暫停/融券暫停)
+  12. 個股新聞
+  13. 產業鏈同業
+
+跑法:
+  FINMIND_TOKEN=xxx python tw_stock_deepdive.py 2330
+  FINMIND_TOKEN=xxx python tw_stock_deepdive.py 2330 6139 5274
+  TICKER=2330 python tw_stock_deepdive.py
 
 輸出:
-  data/tw_deepdive/{CODE}_深度.xlsx 含 5 分頁:
-    [10年營收EPS] - 年度營收/EPS + YoY + 拐點旗標
-    [近12月營收]  - 月營收 + YoY + MoM
-    [近4季財報]   - 最新季 vs 去年同期
-    [長期報酬]    - 10/5/3/1y 含息年化(用 TaiwanStockPriceAdj)
-    [近期走勢]    - 6/3/1m 周線
-    [買進訊號]    - MA50/MA200/RSI14/52週高低
+  data/deepdive/台股深度_{代號}.xlsx  (~20 分頁完整資料)
+  data/deepdive/台股深度_{代號}.md    (Markdown 精華)
 """
-import os
-import sys
-import time
-import requests
+import os, sys, time, requests
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 TOKEN = os.environ.get("FINMIND_TOKEN", "")
 BASE = "https://api.finmindtrade.com/api/v4/data"
-OUT_DIR = "data/tw_deepdive"
-os.makedirs(OUT_DIR, exist_ok=True)
+OUT_DIR = os.environ.get("OUT_DIR", "data/deepdive")
+END = datetime.now().strftime("%Y-%m-%d")
+D90 = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+D1Y = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+D3Y = (datetime.now() - timedelta(days=365*3)).strftime("%Y-%m-%d")
+D10Y = (datetime.now() - timedelta(days=365*10)).strftime("%Y-%m-%d")
 
 
-def get(dataset, **params):
-    params["dataset"] = dataset
-    if TOKEN: params["token"] = TOKEN
-    for attempt in range(3):
+def fm(dataset, data_id=None, start=None, end=None):
+    p = {"dataset": dataset}
+    if data_id: p["data_id"] = data_id
+    if start: p["start_date"] = start
+    if end: p["end_date"] = end
+    if TOKEN: p["token"] = TOKEN
+    for i in range(3):
         try:
-            r = requests.get(BASE, params=params, timeout=20)
-        except Exception:
-            time.sleep(1); continue
-        if r.status_code == 402: time.sleep(5); continue
-        if r.status_code != 200: return None
-        j = r.json()
-        if j.get("status") != 200: return None
-        return j.get("data", [])
-    return None
+            r = requests.get(BASE, params=p, timeout=30)
+            if r.status_code == 402: return pd.DataFrame()
+            if r.status_code == 429: time.sleep(3*(i+1)); continue
+            if r.status_code != 200: return pd.DataFrame()
+            return pd.DataFrame(r.json().get("data", []))
+        except Exception: time.sleep(1)
+    return pd.DataFrame()
 
 
-def annual_revenue_eps(code):
-    """10 年年度營收+EPS:從季財報加總"""
-    today = datetime.now(timezone.utc).date()
-    start = (today - timedelta(days=int(11*365.25))).isoformat()
-    fin = get("TaiwanStockFinancialStatements", data_id=code, start_date=start)
-    if not fin: return None
-    df = pd.DataFrame(fin)
-    if df.empty: return None
-    # 抓營收 & EPS
-    rev = df[df["type"] == "Revenue"][["date","value"]].rename(columns={"value":"營收"})
-    eps = df[df["type"] == "EPS"][["date","value"]].rename(columns={"value":"EPS"})
-    gp  = df[df["type"] == "GrossProfit"][["date","value"]].rename(columns={"value":"毛利"})
-    ni  = df[df["type"] == "IncomeAfterTaxes"][["date","value"]].rename(columns={"value":"稅後淨利"})
-    m = rev
-    for d in (eps, gp, ni):
-        if not d.empty: m = m.merge(d, on="date", how="left")
-    m["date"] = pd.to_datetime(m["date"])
-    m["年度"] = m["date"].dt.year
-    m["季"] = m["date"].dt.quarter
-    # 加總成年度
-    yr = m.groupby("年度").agg({"營收":"sum","EPS":"sum","毛利":"sum","稅後淨利":"sum"})
-    yr["營收(億)"] = (yr["營收"]/1e8).round(1)
-    yr["毛利率%"] = (yr["毛利"]/yr["營收"]*100).round(1)
-    yr["淨利率%"] = (yr["稅後淨利"]/yr["營收"]*100).round(1)
-    yr["EPS"] = yr["EPS"].round(2)
-    yr["營收YoY%"] = yr["營收(億)"].pct_change().mul(100).round(1)
-    yr["EPS YoY%"] = yr["EPS"].pct_change().mul(100).round(1)
-    yoy = yr["營收YoY%"].fillna(0).values
-    flag = [""] * len(yoy)
-    for i in range(3, len(yoy)):
-        if yoy[i] < -5 and all(v > 5 for v in yoy[i-2:i]): flag[i] = "⚠️ 由盛轉衰"
-        if yoy[i] > 5 and all(v < -5 for v in yoy[i-2:i]): flag[i] = "🟢 反轉向上"
-    yr["營收拐點"] = flag
-    yr = yr.reset_index()[["年度","營收(億)","毛利率%","淨利率%","EPS","營收YoY%","EPS YoY%","營收拐點"]]
-    return yr
+def fetch_all(sid):
+    tasks = [
+        ("info",         ("TaiwanStockInfo", None, None, None)),
+        ("industry",     ("TaiwanStockIndustryChain", None, None, None)),
+        ("price_1y",     ("TaiwanStockPriceAdj", sid, D1Y, END)),
+        ("price_10y",    ("TaiwanStockPriceAdj", sid, D10Y, END)),
+        ("per",          ("TaiwanStockPER", sid, D3Y, END)),
+        ("month_rev",    ("TaiwanStockMonthRevenue", sid, D10Y, END)),
+        ("income",       ("TaiwanStockFinancialStatements", sid, D10Y, END)),
+        ("bs",           ("TaiwanStockBalanceSheet", sid, D10Y, END)),
+        ("cf",           ("TaiwanStockCashFlowsStatement", sid, D10Y, END)),
+        ("market_val",   ("TaiwanStockMarketValue", sid, D3Y, END)),
+        ("inst_wide",    ("TaiwanStockInstitutionalInvestorsBuySellWide", sid, D90, END)),
+        ("shareholding", ("TaiwanStockShareholding", sid, D1Y, END)),
+        ("gov_bank",     ("TaiwanstockGovernmentBankBuySell", sid, D90, END)),
+        ("margin",       ("TaiwanStockMarginPurchaseShortSale", sid, D1Y, END)),
+        ("lending",      ("TaiwanStockSecuritiesLending", sid, D90, END)),
+        ("shares_per",   ("TaiwanStockHoldingSharesPer", sid, D1Y, END)),
+        ("dividend",     ("TaiwanStockDividend", sid, D10Y, END)),
+        ("div_result",   ("TaiwanStockDividendResult", sid, D3Y, END)),
+        ("split",        ("TaiwanStockSplitPrice", sid, D10Y, END)),
+        ("capred",       ("TaiwanStockCapitalReductionReferencePrice", sid, D10Y, END)),
+        ("disp",         ("TaiwanStockDispositionSecuritiesPeriod", sid, D1Y, END)),
+        ("suspend",      ("TaiwanStockSuspended", sid, D1Y, END)),
+        ("ms_suspend",   ("TaiwanStockMarginShortSaleSuspension", sid, D1Y, END)),
+        ("news",         ("TaiwanStockNews", sid, D90, END)),
+    ]
+    out = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        futs = {ex.submit(fm, *args): key for key, args in tasks}
+        for fut in as_completed(futs):
+            key = futs[fut]
+            try: out[key] = fut.result()
+            except Exception: out[key] = pd.DataFrame()
+    return out
 
 
-def monthly_revenue(code):
-    """近 12 月月營收 + YoY/MoM"""
-    today = datetime.now(timezone.utc).date()
-    start = (today - timedelta(days=540)).isoformat()
-    r = get("TaiwanStockMonthRevenue", data_id=code, start_date=start)
-    if not r: return None
-    df = pd.DataFrame(r).sort_values("date").reset_index(drop=True)
-    df["營收(億)"] = (df["revenue"]/1e8).round(1)
-    df["YoY%"] = pd.to_numeric(df.get("revenue_year"), errors="coerce").round(1)
-    df["MoM%"] = pd.to_numeric(df.get("revenue_month"), errors="coerce").round(1)
-    df["年月"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m")
-    return df[["年月","營收(億)","YoY%","MoM%"]].tail(12).reset_index(drop=True)
+def build_xlsx(sid, name, data, dst):
+    sheets = {}
+
+    # 產業
+    ind_dataset = data.get("industry", pd.DataFrame())
+    industry_str = ""
+    if not ind_dataset.empty and "stock_id" in ind_dataset.columns:
+        my = ind_dataset[ind_dataset["stock_id"].astype(str) == str(sid)]
+        if len(my) and "industry_category" in my.columns:
+            industry_str = " / ".join(my["industry_category"].astype(str).unique()[:3])
+
+    # 股價
+    price_1y = data.get("price_1y", pd.DataFrame())
+    latest_price = year_high = year_low = None
+    if not price_1y.empty and "close" in price_1y.columns:
+        p = price_1y.sort_values("date")
+        latest_price = float(p.iloc[-1]["close"])
+        year_high = float(p["max"].max()) if "max" in p.columns else float(p["close"].max())
+        year_low = float(p["min"].min()) if "min" in p.columns else float(p["close"].min())
+
+    # PER/PBR
+    per = data.get("per", pd.DataFrame())
+    latest_per = latest_pbr = div_yield = None
+    if not per.empty:
+        per_s = per.sort_values("date")
+        latest_per = per_s.iloc[-1].get("PER")
+        latest_pbr = per_s.iloc[-1].get("PBR")
+        div_yield = per_s.iloc[-1].get("dividend_yield")
+
+    # 市值
+    mv = data.get("market_val", pd.DataFrame())
+    latest_mv = None
+    if not mv.empty and "market_value" in mv.columns:
+        latest_mv = mv.sort_values("date").iloc[-1]["market_value"]
+
+    # 月營收 YoY
+    mrev = data.get("month_rev", pd.DataFrame())
+    rev_yoy = latest_month_rev = None
+    if not mrev.empty:
+        mrev_s = mrev.sort_values("date")
+        latest_month_rev = mrev_s.iloc[-1].get("revenue")
+        if "revenue_year_growth" in mrev.columns:
+            rev_yoy = mrev_s.iloc[-1].get("revenue_year_growth")
+
+    # 三大法人 90d
+    iw = data.get("inst_wide", pd.DataFrame())
+    def s(df, col): return int(df[col].sum()) if col in df.columns else 0
+    f_net = t_net = d_net = 0
+    if not iw.empty:
+        f_net = s(iw,"Foreign_Investor_buy") - s(iw,"Foreign_Investor_sell")
+        t_net = s(iw,"Investment_Trust_buy") - s(iw,"Investment_Trust_sell")
+        d_net = (s(iw,"Dealer_buy")+s(iw,"Dealer_self_buy")+s(iw,"Dealer_Hedging_buy")
+                 - s(iw,"Dealer_sell")-s(iw,"Dealer_self_sell")-s(iw,"Dealer_Hedging_sell"))
+
+    # 外資持股
+    sh = data.get("shareholding", pd.DataFrame())
+    foreign_pct = None
+    if not sh.empty and "ForeignInvestmentSharesRatio" in sh.columns:
+        foreign_pct = sh.sort_values("date").iloc[-1]["ForeignInvestmentSharesRatio"]
+
+    # 融資融券
+    mg = data.get("margin", pd.DataFrame())
+    margin_balance = short_balance = None
+    if not mg.empty:
+        mg_s = mg.sort_values("date")
+        if "MarginPurchaseTodayBalance" in mg_s.columns:
+            margin_balance = int(mg_s.iloc[-1]["MarginPurchaseTodayBalance"])
+        if "ShortSaleTodayBalance" in mg_s.columns:
+            short_balance = int(mg_s.iloc[-1]["ShortSaleTodayBalance"])
+
+    # 警戒
+    disp_count = len(data.get("disp", pd.DataFrame()))
+    suspend_count = len(data.get("suspend", pd.DataFrame()))
+
+    # === 概覽 ===
+    ov = [
+        ("代號", sid), ("名稱", name), ("產業", industry_str),
+        ("─── 報價 ───", ""),
+        ("當前價", latest_price),
+        ("52w 高", year_high), ("52w 低", year_low),
+        ("市值(億)", round((latest_mv or 0)/1e8, 1) if latest_mv else None),
+        ("─── 估值 ───", ""),
+        ("PER", latest_per), ("PBR", latest_pbr), ("殖利率%", div_yield),
+        ("─── 動能 ───", ""),
+        ("最新月營收(億)", round((latest_month_rev or 0)/1e8, 1) if latest_month_rev else None),
+        ("月營收 YoY%", rev_yoy),
+        ("─── 籌碼 90d ───", ""),
+        ("外資淨(千股)", round((f_net or 0)/1000, 0) if f_net else None),
+        ("投信淨(千股)", round((t_net or 0)/1000, 0) if t_net else None),
+        ("自營淨(千股)", round((d_net or 0)/1000, 0) if d_net else None),
+        ("三大合計(千股)", round(((f_net or 0)+(t_net or 0)+(d_net or 0))/1000, 0)),
+        ("外資持股%", foreign_pct),
+        ("─── 散戶 ───", ""),
+        ("融資餘額(張)", round((margin_balance or 0)/1000, 0) if margin_balance else None),
+        ("融券餘額(張)", round((short_balance or 0)/1000, 0) if short_balance else None),
+        ("─── 警戒 ───", ""),
+        ("1y 處置", disp_count),
+        ("1y 暫停", suspend_count),
+    ]
+    sheets["概覽"] = pd.DataFrame(ov, columns=["項目","值"])
+
+    # === 月營收 10Y ===
+    if not mrev.empty and "revenue" in mrev.columns:
+        m = mrev.copy()
+        m["營收(億)"] = (m["revenue"] / 1e8).round(2)
+        keep_cols = ["date","營收(億)"]
+        if "revenue_year_growth" in m.columns:
+            m["YoY%"] = m["revenue_year_growth"]; keep_cols.append("YoY%")
+        if "revenue_month_growth" in m.columns:
+            m["MoM%"] = m["revenue_month_growth"]; keep_cols.append("MoM%")
+        sheets["月營收10Y"] = m[keep_cols].sort_values("date", ascending=False)
+
+    # === 損益季 10Y (pivot) ===
+    inc = data.get("income", pd.DataFrame())
+    if not inc.empty and "type" in inc.columns:
+        keep = ["Revenue","CostOfGoodsSold","GrossProfit","OperatingExpenses",
+                "OperatingIncome","IncomeAfterTaxes","EPS",
+                "ResearchAndDevelopmentExpenses","IncomeAttributableToOwnersOfParent",
+                "TotalNonoperatingIncomeAndExpense","IncomeBeforeIncomeTax"]
+        i2 = inc[inc["type"].isin(keep)]
+        if not i2.empty:
+            piv = i2.pivot_table(index="date", columns="type", values="value", aggfunc="last")
+            sheets["損益季10Y"] = piv.sort_index(ascending=False).reset_index()
+
+    # === 資產負債季 ===
+    bs = data.get("bs", pd.DataFrame())
+    if not bs.empty and "type" in bs.columns:
+        keep = ["CashAndCashEquivalents","Inventories","AccountsReceivableNet",
+                "TotalCurrentAssets","PropertyPlantAndEquipment","TotalAssets",
+                "AccountsPayable","ShortTermBorrowings","TotalCurrentLiabilities",
+                "LongTermLiabilities","Liabilities","TotalLiabilities","Equity",
+                "EquityAttributableToOwnersOfParent"]
+        b2 = bs[bs["type"].isin(keep)]
+        if not b2.empty:
+            piv = b2.pivot_table(index="date", columns="type", values="value", aggfunc="last")
+            sheets["資產負債季10Y"] = piv.sort_index(ascending=False).reset_index()
+
+    # === 現金流季 ===
+    cf = data.get("cf", pd.DataFrame())
+    if not cf.empty and "type" in cf.columns:
+        keep = ["CashFlowsFromOperatingActivities","CashFlowsFromInvestingActivities",
+                "CashFlowsFromFinancingActivities","PropertyPlantAndEquipment",
+                "AcquisitionOfPropertyPlantAndEquipment"]
+        c2 = cf[cf["type"].isin(keep)]
+        if not c2.empty:
+            piv = c2.pivot_table(index="date", columns="type", values="value", aggfunc="last")
+            sheets["現金流季10Y"] = piv.sort_index(ascending=False).reset_index()
+
+    # === 年營收成長 + CAGR ===
+    if not mrev.empty:
+        m = mrev.copy(); m["year"] = m["date"].astype(str).str[:4]
+        yearly = m.groupby("year").agg(rev=("revenue","sum"), months=("date","count"))
+        yearly = yearly[yearly["months"] >= 12].copy()
+        yearly["營收(億)"] = (yearly["rev"] / 1e8).round(2)
+        yearly["YoY%"] = (yearly["營收(億)"].pct_change() * 100).round(1)
+        sheets["年營收成長"] = yearly.reset_index()[["year","營收(億)","YoY%"]]
+        # CAGR
+        cagr_rows = []
+        if len(yearly) >= 4:
+            latest_y = yearly.index[-1]; latest_v = yearly.iloc[-1]["營收(億)"]
+            for label, n in [("3y", 3), ("5y", 5), ("10y", 10)]:
+                if len(yearly) > n:
+                    start_v = yearly.iloc[-n-1]["營收(億)"]
+                    start_y = yearly.index[-n-1]
+                    if start_v > 0 and latest_v > 0:
+                        c = round(((latest_v/start_v)**(1/n) - 1) * 100, 1)
+                        cagr_rows.append((label, f"{start_y}→{latest_y}", c))
+        if cagr_rows:
+            sheets["營收CAGR"] = pd.DataFrame(cagr_rows, columns=["期間","區間","CAGR%"])
+
+    # === PER/PBR 歷史 ===
+    if not per.empty:
+        keep_cols = [c for c in ["date","PER","PBR","dividend_yield"] if c in per.columns]
+        sheets["PER_PBR"] = per[keep_cols].sort_values("date", ascending=False)
+
+    # === 市值歷史 ===
+    if not mv.empty and "market_value" in mv.columns:
+        mv2 = mv.copy()
+        mv2["市值(億)"] = (mv2["market_value"] / 1e8).round(1)
+        sheets["市值歷史"] = mv2.sort_values("date", ascending=False)[["date","市值(億)"]]
+
+    # === 三大法人 90d ===
+    if not iw.empty:
+        keep = [c for c in ["date","Foreign_Investor_buy","Foreign_Investor_sell",
+                             "Investment_Trust_buy","Investment_Trust_sell",
+                             "Dealer_self_buy","Dealer_self_sell",
+                             "Dealer_Hedging_buy","Dealer_Hedging_sell"] if c in iw.columns]
+        if keep: sheets["三大法人90d"] = iw[keep].sort_values("date", ascending=False)
+
+    # === 外資持股 ===
+    if not sh.empty:
+        keep = [c for c in ["date","ForeignInvestmentSharesRatio","ForeignInvestmentRemainRatio",
+                             "ForeignInvestmentUpperLimitRatio","NumberOfSharesIssued"] if c in sh.columns]
+        if keep: sheets["外資持股"] = sh[keep].sort_values("date", ascending=False)
+
+    # === 八大行庫 ===
+    gb = data.get("gov_bank", pd.DataFrame())
+    if not gb.empty:
+        if "stock_id" in gb.columns:
+            gb = gb[gb["stock_id"].astype(str) == str(sid)]
+        if not gb.empty:
+            sheets["八大行庫"] = gb.sort_values("date", ascending=False)
+
+    # === 融資融券 ===
+    if not mg.empty:
+        keep = [c for c in ["date","MarginPurchaseBuy","MarginPurchaseSell",
+                             "MarginPurchaseTodayBalance","ShortSaleBuy",
+                             "ShortSaleSell","ShortSaleTodayBalance"] if c in mg.columns]
+        if keep: sheets["融資融券"] = mg[keep].sort_values("date", ascending=False)
+
+    # === 借券 ===
+    lending = data.get("lending", pd.DataFrame())
+    if not lending.empty:
+        sheets["借券90d"] = lending.sort_values("date", ascending=False)
+
+    # === 股權分級 ===
+    sp = data.get("shares_per", pd.DataFrame())
+    if not sp.empty:
+        sheets["股權分級"] = sp.sort_values("date", ascending=False)
+
+    # === 股利歷史 ===
+    div = data.get("dividend", pd.DataFrame())
+    if not div.empty:
+        sheets["股利歷史"] = div.sort_values("date", ascending=False)
+
+    # === 除權除息 ===
+    dr = data.get("div_result", pd.DataFrame())
+    if not dr.empty:
+        sheets["除權除息結果"] = dr.sort_values("date", ascending=False)
+
+    # === 拆股/減資 ===
+    split = data.get("split", pd.DataFrame())
+    if not split.empty:
+        sheets["拆股"] = split.sort_values("date", ascending=False)
+    capred = data.get("capred", pd.DataFrame())
+    if not capred.empty:
+        sheets["減資"] = capred.sort_values("date", ascending=False)
+
+    # === 警戒 ===
+    disp = data.get("disp", pd.DataFrame())
+    if not disp.empty:
+        sheets["處置歷史"] = disp.sort_values("date", ascending=False)
+    suspend = data.get("suspend", pd.DataFrame())
+    if not suspend.empty:
+        sheets["暫停歷史"] = suspend.sort_values("date", ascending=False)
+    mss = data.get("ms_suspend", pd.DataFrame())
+    if not mss.empty:
+        sheets["融券暫停"] = mss.sort_values("date", ascending=False)
+
+    # === 同業 (從產業鏈) ===
+    if not ind_dataset.empty and "stock_id" in ind_dataset.columns:
+        my_ind = ind_dataset[ind_dataset["stock_id"].astype(str) == str(sid)]
+        if len(my_ind) and "industry_category" in my_ind.columns:
+            my_cats = set(my_ind["industry_category"].astype(str))
+            peers = ind_dataset[ind_dataset["industry_category"].astype(str).isin(my_cats)]
+            peers = peers[peers["stock_id"].astype(str) != str(sid)]
+            if not peers.empty:
+                sheets["同業"] = peers.drop_duplicates(subset="stock_id").head(30)
+
+    # === 新聞 ===
+    news = data.get("news", pd.DataFrame())
+    if not news.empty:
+        keep = [c for c in ["date","title","description","link","source"] if c in news.columns]
+        if keep: sheets["新聞"] = news[keep].sort_values("date", ascending=False).head(30)
+
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with pd.ExcelWriter(dst, engine="openpyxl") as xw:
+        for sname, df in sheets.items():
+            df.to_excel(xw, sheet_name=sname[:31], index=False)
+    return sheets
 
 
-def latest_quarters(code):
-    """近 4 季 vs 去年同期"""
-    today = datetime.now(timezone.utc).date()
-    start = (today - timedelta(days=730)).isoformat()
-    fin = get("TaiwanStockFinancialStatements", data_id=code, start_date=start)
-    if not fin: return None
-    df = pd.DataFrame(fin)
-    rev = df[df["type"]=="Revenue"][["date","value"]].rename(columns={"value":"營收"})
-    eps = df[df["type"]=="EPS"][["date","value"]].rename(columns={"value":"EPS"})
-    gp  = df[df["type"]=="GrossProfit"][["date","value"]].rename(columns={"value":"毛利"})
-    ni  = df[df["type"]=="IncomeAfterTaxes"][["date","value"]].rename(columns={"value":"稅後淨利"})
-    m = rev
-    for d in (eps, gp, ni):
-        if not d.empty: m = m.merge(d, on="date", how="left")
-    m["date"] = pd.to_datetime(m["date"])
-    m = m.sort_values("date").reset_index(drop=True)
-    m["營收(億)"] = (m["營收"]/1e8).round(1)
-    m["毛利率%"] = (m["毛利"]/m["營收"]*100).round(1)
-    m["淨利率%"] = (m["稅後淨利"]/m["營收"]*100).round(1)
-    m["EPS"] = m["EPS"].round(2)
-    m["營收YoY%"] = ((m["營收(億)"]-m["營收(億)"].shift(4))/m["營收(億)"].shift(4)*100).round(1)
-    m["EPS YoY%"] = ((m["EPS"]-m["EPS"].shift(4))/m["EPS"].shift(4)*100).round(1)
-    m["季"] = m["date"].dt.strftime("%Y-Q%q").str.replace("Q1","Q1").str.replace("Q2","Q2").str.replace("Q3","Q3").str.replace("Q4","Q4")
-    m["季"] = m["date"].dt.year.astype(str) + "Q" + m["date"].dt.quarter.astype(str)
-    return m[["季","營收(億)","毛利率%","淨利率%","EPS","營收YoY%","EPS YoY%"]].tail(4).reset_index(drop=True)
+def build_md(sid, name, data, dst):
+    price_1y = data.get("price_1y", pd.DataFrame())
+    per = data.get("per", pd.DataFrame())
+    mv = data.get("market_val", pd.DataFrame())
+    mrev = data.get("month_rev", pd.DataFrame())
+    iw = data.get("inst_wide", pd.DataFrame())
+    sh = data.get("shareholding", pd.DataFrame())
+    mg = data.get("margin", pd.DataFrame())
+    div = data.get("dividend", pd.DataFrame())
+    news = data.get("news", pd.DataFrame())
+    disp = data.get("disp", pd.DataFrame())
+    ind_dataset = data.get("industry", pd.DataFrame())
+
+    def num(v, d=2):
+        try: return f"{float(v):,.{d}f}"
+        except: return "—"
+
+    latest_price = year_high = year_low = None
+    if not price_1y.empty and "close" in price_1y.columns:
+        p = price_1y.sort_values("date")
+        latest_price = float(p.iloc[-1]["close"])
+        year_high = float(p["max"].max()) if "max" in p.columns else float(p["close"].max())
+        year_low = float(p["min"].min()) if "min" in p.columns else float(p["close"].min())
+
+    latest_per = latest_pbr = div_y = None
+    if not per.empty:
+        pers = per.sort_values("date")
+        latest_per = pers.iloc[-1].get("PER")
+        latest_pbr = pers.iloc[-1].get("PBR")
+        div_y = pers.iloc[-1].get("dividend_yield")
+
+    latest_mv = None
+    if not mv.empty and "market_value" in mv.columns:
+        latest_mv = mv.sort_values("date").iloc[-1]["market_value"]
+
+    rev_yoy = latest_month_rev = None
+    if not mrev.empty:
+        mrs = mrev.sort_values("date")
+        latest_month_rev = mrs.iloc[-1].get("revenue")
+        rev_yoy = mrs.iloc[-1].get("revenue_year_growth")
+
+    def s(df, col): return int(df[col].sum()) if col in df.columns else 0
+    f_net = t_net = d_net = 0
+    if not iw.empty:
+        f_net = s(iw,"Foreign_Investor_buy") - s(iw,"Foreign_Investor_sell")
+        t_net = s(iw,"Investment_Trust_buy") - s(iw,"Investment_Trust_sell")
+        d_net = (s(iw,"Dealer_buy")+s(iw,"Dealer_self_buy")+s(iw,"Dealer_Hedging_buy")
+                 - s(iw,"Dealer_sell")-s(iw,"Dealer_self_sell")-s(iw,"Dealer_Hedging_sell"))
+
+    foreign_pct = None
+    if not sh.empty and "ForeignInvestmentSharesRatio" in sh.columns:
+        foreign_pct = sh.sort_values("date").iloc[-1]["ForeignInvestmentSharesRatio"]
+
+    industry_str = ""
+    if not ind_dataset.empty and "stock_id" in ind_dataset.columns:
+        my = ind_dataset[ind_dataset["stock_id"].astype(str) == str(sid)]
+        if len(my) and "industry_category" in my.columns:
+            industry_str = " / ".join(my["industry_category"].astype(str).unique()[:3])
+
+    # CAGR
+    cagr_lines = []
+    if not mrev.empty:
+        m = mrev.copy(); m["year"] = m["date"].astype(str).str[:4]
+        yearly = m.groupby("year").agg(rev=("revenue","sum"), months=("date","count"))
+        yearly = yearly[yearly["months"] >= 12].sort_index()
+        if len(yearly) >= 4:
+            latest_v = yearly.iloc[-1]["rev"]
+            for label, n in [("3y", 3), ("5y", 5), ("10y", 10)]:
+                if len(yearly) > n:
+                    start_v = yearly.iloc[-n-1]["rev"]
+                    if start_v > 0 and latest_v > 0:
+                        c = round(((latest_v/start_v)**(1/n) - 1) * 100, 1)
+                        cagr_lines.append((label, c))
+
+    md = f"""# 🔍 {sid} — {name}
+
+**產業:** {industry_str or '—'}
+
+---
+
+## 💰 報價 & 估值
+
+| 項目 | 值 | 項目 | 值 |
+|---|---:|---|---:|
+| 股價 | **${num(latest_price)}** | 市值 | {round((latest_mv or 0)/1e8, 1) if latest_mv else '—'} 億 |
+| 52w 高 | {num(year_high)} | 52w 低 | {num(year_low)} |
+| **PER** | **{num(latest_per)}** | PBR | {num(latest_pbr)} |
+| 殖利率 | {num(div_y)}% | — | — |
+
+## 📈 營收動能
+
+| 項目 | 值 |
+|---|---:|
+| 最新月營收 | **{round((latest_month_rev or 0)/1e8, 1) if latest_month_rev else '—'} 億** |
+| **月營收 YoY** | **{num(rev_yoy)}%** |"""
+    for label, c in cagr_lines:
+        md += f"\n| 營收 {label} CAGR | **{c}%** |"
+
+    md += f"""
+
+## 🌍 籌碼 (90 天累計)
+
+| 項目 | 千股 |
+|---|---:|
+| 🌍 外資淨買賣 | **{round(f_net/1000, 0):,.0f}** |
+| 📈 投信淨買賣 | **{round(t_net/1000, 0):,.0f}** |
+| 🎯 自營淨買賣 | **{round(d_net/1000, 0):,.0f}** |
+| **三大合計** | **{round((f_net+t_net+d_net)/1000, 0):,.0f}** |
+| 外資持股 % | **{num(foreign_pct)}%** |
+"""
+
+    if not mg.empty:
+        mgs = mg.sort_values("date")
+        mb = mgs.iloc[-1].get("MarginPurchaseTodayBalance")
+        sb = mgs.iloc[-1].get("ShortSaleTodayBalance")
+        md += f"\n## 💸 散戶\n\n- 融資餘額: **{int((mb or 0)/1000):,} 張**\n- 融券餘額: **{int((sb or 0)/1000):,} 張**\n"
+
+    if not disp.empty:
+        md += f"\n## ⚠️ 警戒 (近 1 年)\n\n- 處置次數: **{len(disp)}** 次\n"
+        for _, r in disp.sort_values("date", ascending=False).head(3).iterrows():
+            md += f"  - {r.get('date','')}: {str(r.get('condition',''))[:50]}\n"
+
+    if not ind_dataset.empty and "stock_id" in ind_dataset.columns:
+        my_ind = ind_dataset[ind_dataset["stock_id"].astype(str) == str(sid)]
+        if len(my_ind) and "industry_category" in my_ind.columns:
+            my_cats = set(my_ind["industry_category"].astype(str))
+            peers = ind_dataset[ind_dataset["industry_category"].astype(str).isin(my_cats)]
+            peers = peers[peers["stock_id"].astype(str) != str(sid)].drop_duplicates(subset="stock_id")
+            if not peers.empty:
+                md += "\n## 👥 同業 (產業鏈)\n\n"
+                for _, r in peers.head(10).iterrows():
+                    md += f"- **{r.get('stock_id','')}** {r.get('stock_name','')} ({r.get('industry_category','')})\n"
+
+    if not div.empty:
+        md += "\n## 💵 股利歷史 (近 5 年)\n\n| 年 | 現金 | 股票 |\n|---|---:|---:|"
+        for _, r in div.sort_values("date", ascending=False).head(5).iterrows():
+            cash = r.get("CashEarningsDistribution", 0) or 0
+            stk = r.get("StockEarningsDistribution", 0) or 0
+            md += f"\n| {(r.get('date') or '')[:4]} | {cash:.2f} | {stk:.2f} |"
+
+    if not news.empty:
+        md += "\n\n## 📰 最新新聞\n\n"
+        for _, r in news.sort_values("date", ascending=False).head(5).iterrows():
+            title = str(r.get("title",""))[:80]; date = str(r.get("date",""))[:10]
+            link = r.get("link","")
+            md += f"- [{title}]({link}) — *{date}*\n"
+
+    md += f"\n\n---\n\n_資料源: FinMind • 生成 {datetime.now().strftime('%Y-%m-%d %H:%M')}_\n"
+
+    os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+    with open(dst, "w", encoding="utf-8") as f:
+        f.write(md)
 
 
-def fetch_prices(code, years=11):
-    """抓 ~11 年 EOD,用 TaiwanStockPriceAdj(已含股息再投資)"""
-    today = datetime.now(timezone.utc).date()
-    start = (today - timedelta(days=int(years*365.25))).isoformat()
-    r = get("TaiwanStockPriceAdj", data_id=code, start_date=start)
-    if not r:
-        r = get("TaiwanStockPrice", data_id=code, start_date=start)
-    if not r: return None
-    df = pd.DataFrame(r).sort_values("date").reset_index(drop=True)
-    df["date"] = pd.to_datetime(df["date"])
-    if "close" not in df.columns: return None
-    df["adjClose"] = df["close"]  # PriceAdj 已經是調整後
-    return df[["date","close","adjClose"]]
+def get_name(sid, data):
+    info = data.get("info", pd.DataFrame())
+    if not info.empty and "stock_id" in info.columns:
+        info["stock_id"] = info["stock_id"].astype(str)
+        r = info[info["stock_id"] == str(sid)]
+        if len(r): return r.iloc[0].get("stock_name", "")
+    return ""
 
 
-def long_term_returns(prices):
-    if prices is None or len(prices)==0: return None
-    last = prices.iloc[-1]
-    rows = []
-    for label, yrs in [("10y",10),("5y",5),("3y",3),("1y",1)]:
-        tgt = last["date"] - pd.Timedelta(days=int(yrs*365.25))
-        sub = prices[prices["date"] <= tgt]
-        if len(sub)==0 or sub.iloc[-1]["adjClose"] <= 0: continue
-        p0 = sub.iloc[-1]["adjClose"]
-        total = (last["adjClose"]/p0 - 1) * 100
-        cagr = ((last["adjClose"]/p0) ** (1/yrs) - 1) * 100
-        rows.append({"區間":label, "起始日":sub.iloc[-1]["date"].date(),
-                     "起始價(調)":round(p0,2), "現價(調)":round(last["adjClose"],2),
-                     "總報酬%":round(total,1), "年化%":round(cagr,2)})
-    return pd.DataFrame(rows)
-
-
-def recent_weekly(prices):
-    if prices is None: return None
-    last = prices["date"].max()
-    rows = []
-    for label, days in [("6m",180),("3m",90),("1m",30)]:
-        sub = prices[prices["date"] >= (last - pd.Timedelta(days=days))].copy()
-        if len(sub)==0: continue
-        sub = sub.set_index("date").resample("W-FRI").last().dropna(subset=["close"]).reset_index()
-        if len(sub) < 2: continue
-        chg = (sub.iloc[-1]["close"] / sub.iloc[0]["close"] - 1) * 100
-        rows.append({"區間":label, "週數":len(sub),
-                     "起始":round(sub.iloc[0]["close"],2),
-                     "現價":round(sub.iloc[-1]["close"],2),
-                     "區間漲跌%":round(chg,1)})
-    return pd.DataFrame(rows)
-
-
-def buy_signal(prices):
-    if prices is None or len(prices) < 200: return None
-    p = prices["close"].values
-    cur = p[-1]; ma50 = p[-50:].mean(); ma200 = p[-200:].mean()
-    delta = pd.Series(p).diff()
-    gain = delta.clip(lower=0).rolling(14).mean()
-    loss = (-delta.clip(upper=0)).rolling(14).mean()
-    rsi = (100 - 100/(1 + gain/loss)).iloc[-1]
-    p52 = prices[prices["date"] >= prices["date"].max() - pd.Timedelta(days=365)]["close"]
-    hi52, lo52 = p52.max(), p52.min()
-    sig = []
-    if cur < ma50 < ma200: sig.append("🔴 空頭排列")
-    elif cur > ma50 > ma200: sig.append("🟢 多頭排列")
-    if rsi < 30: sig.append(f"🟢 超賣(RSI {rsi:.0f})")
-    elif rsi > 70: sig.append(f"🔴 超買(RSI {rsi:.0f})")
-    if cur < lo52 * 1.05: sig.append("🟢 接近52週低")
-    if cur > hi52 * 0.97: sig.append("🔴 接近52週高")
-    return pd.DataFrame([{
-        "現價":round(cur,2),"MA50":round(ma50,2),"MA200":round(ma200,2),
-        "距MA50%":round((cur/ma50-1)*100,1),"距MA200%":round((cur/ma200-1)*100,1),
-        "RSI14":round(rsi,1),
-        "52週高":round(hi52,2),"距52高%":round((cur/hi52-1)*100,1),
-        "52週低":round(lo52,2),"距52低%":round((cur/lo52-1)*100,1),
-        "綜合訊號":" | ".join(sig) if sig else "中性"
-    }])
-
-
-def analyze(code):
-    print(f"\n{'='*60}\n  {code} 深度分析\n{'='*60}")
-    rev = annual_revenue_eps(code)
-    mon = monthly_revenue(code)
-    qtr = latest_quarters(code)
-    prices = fetch_prices(code)
-    ret = long_term_returns(prices)
-    wk = recent_weekly(prices)
-    sig = buy_signal(prices)
-
-    if rev is not None: print("\n[10 年年度營收 EPS]"); print(rev.to_string(index=False))
-    if mon is not None: print("\n[近 12 月月營收]");    print(mon.to_string(index=False))
-    if qtr is not None: print("\n[近 4 季財報]");        print(qtr.to_string(index=False))
-    if ret is not None: print("\n[10/5/3/1y 含息年化]"); print(ret.to_string(index=False))
-    if wk is not None:  print("\n[近期周線]");           print(wk.to_string(index=False))
-    if sig is not None: print("\n[買進訊號]");           print(sig.to_string(index=False))
-
-    out = f"{OUT_DIR}/{code}_深度.xlsx"
-    with pd.ExcelWriter(out, engine="openpyxl") as xw:
-        if rev is not None: rev.to_excel(xw, sheet_name="10年營收EPS", index=False)
-        if mon is not None: mon.to_excel(xw, sheet_name="近12月營收", index=False)
-        if qtr is not None: qtr.to_excel(xw, sheet_name="近4季財報", index=False)
-        if ret is not None: ret.to_excel(xw, sheet_name="長期報酬", index=False)
-        if wk is not None:  wk.to_excel(xw, sheet_name="近期走勢", index=False)
-        if sig is not None: sig.to_excel(xw, sheet_name="買進訊號", index=False)
-    print(f"\n→ 已輸出 {out}")
+def process(sid):
+    print(f"\n=== {sid} 深度研究 ===")
+    t0 = time.time()
+    data = fetch_all(sid)
+    ok = sum(1 for v in data.values() if not v.empty)
+    print(f"  抓 {ok}/{len(data)} dataset ({time.time()-t0:.1f}s)")
+    name = get_name(sid, data)
+    print(f"  名稱: {name}")
+    xlsx_dst = os.path.join(OUT_DIR, f"台股深度_{sid}.xlsx")
+    md_dst = os.path.join(OUT_DIR, f"台股深度_{sid}.md")
+    sheets = build_xlsx(sid, name, data, xlsx_dst)
+    build_md(sid, name, data, md_dst)
+    print(f"  → {xlsx_dst}  ({len(sheets)} 分頁)")
+    print(f"  → {md_dst}")
 
 
 def main():
-    if not TOKEN: print("⚠️ 未設 FINMIND_TOKEN")
-    codes = sys.argv[1:]
-    if not codes: print("用法: python tw_stock_deepdive.py 2330 3017 ..."); return
-    for c in codes: analyze(c)
+    if not TOKEN: print("⚠️ 需 FINMIND_TOKEN"); sys.exit(1)
+    args = [a for a in sys.argv[1:] if a.strip()]
+    if not args:
+        env = os.environ.get("TICKER", "").strip()
+        if env: args = [t.strip() for t in env.replace(",", " ").split() if t.strip()]
+    if not args:
+        print("⚠️ 未指定代號: python tw_stock_deepdive.py 2330"); sys.exit(1)
+    for sid in args: process(sid)
 
 
 if __name__ == "__main__":

@@ -210,14 +210,20 @@ def main():
     print(f"抓 {len(codes)} 檔財務(平行 {WORKERS})")
 
     results = {}
+    failed = []
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         futs = {ex.submit(fetch_one, c): c for c in codes}
         done = 0
         for fut in as_completed(futs):
             sid, data = fut.result()
             if data: results[sid] = data
+            else: failed.append(sid)
             done += 1
-            if done % 10 == 0: print(f"  [{done}/{len(codes)}]")
+            if done % 10 == 0 or done == len(codes):
+                print(f"  [{done}/{len(codes)}] 成功 {len(results)} / 失敗 {len(failed)}")
+
+    if failed and len(failed) <= 20:
+        print(f"⚠️ 失敗清單: {', '.join(failed)}")
 
     # 從體檢總表撈名稱 / 評等 / 品質
     base = pd.DataFrame()
@@ -284,20 +290,31 @@ def main():
         })
 
     ov = pd.DataFrame(overview)
-    if not base.empty:
+    if ov.empty:
+        print(f"⚠️ 全部 {len(codes)} 檔都沒抓到資料, 產生空 xlsx 讓 workflow 不中斷")
+        os.makedirs("data", exist_ok=True)
+        with pd.ExcelWriter(DST, engine="openpyxl") as xw:
+            pd.DataFrame([{"訊息": f"{len(codes)} 檔皆無資料, 檢查 FinMind token 或 watchlist"}]).to_excel(
+                xw, sheet_name="概覽", index=False)
+        print(f"→ 空 xlsx 已產出 {DST}")
+        return
+
+    if not base.empty and "代號" in ov.columns:
         # 統一型別:base 代號可能是 str, results sid 是 str → ov 代號也要 str
         ov["代號"] = ov["代號"].astype(str)
         ov = ov.merge(base, on="代號", how="left")
         front = [c for c in ["代號","名稱","產業","評等","品質總分"] if c in ov.columns]
         rest = [c for c in ov.columns if c not in front]
         ov = ov[front + rest]
-    ov = ov.sort_values("營收3y%", ascending=False, na_position="last")
+    if "營收3y%" in ov.columns:
+        ov = ov.sort_values("營收3y%", ascending=False, na_position="last")
 
     os.makedirs("data", exist_ok=True)
     with pd.ExcelWriter(DST, engine="openpyxl") as xw:
         ov.to_excel(xw, sheet_name="概覽", index=False)
         for m in metrics:
             df = pd.DataFrame(sheets[m])
+            if df.empty: continue
             df["代號"] = df["代號"].astype(str)
             if not base.empty and "名稱" in base.columns:
                 df = df.merge(base[["代號","名稱"]], on="代號", how="left")
@@ -309,7 +326,8 @@ def main():
     print(f"分頁: 概覽 + {' / '.join(metrics)}")
     print(f"\n=== 營收 3y CAGR TOP 15 ({START_YEAR}~{END_YEAR}) ===")
     show_cols = [c for c in ["代號","名稱","評等","營收5y%","營收3y%","營收1y%","淨利3y%","FCF3y%","淨利率Δpp","FCF/NI%"] if c in ov.columns]
-    print(ov[show_cols].head(15).to_string(index=False))
+    if show_cols:
+        print(ov[show_cols].head(15).to_string(index=False))
 
 
 if __name__ == "__main__":

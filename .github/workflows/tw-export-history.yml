@@ -1,0 +1,37 @@
+name: 台灣出口歷史比對
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests pandas openpyxl
+
+      - name: 抓歷史 + 比對
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: python tw_export_history.py
+
+      - name: Commit
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/tw_export_history.xlsx || true
+          if git diff --staged --quiet; then echo "無變更"; exit 0; fi
+          git commit -m "data: 台灣出口歷史比對"
+          for i in 1 2 3 4 5; do
+            git fetch origin main -q && git merge origin/main -X ours --no-edit >/dev/null 2>&1
+            git push && { echo pushed; exit 0; }
+            sleep 6
+          done

@@ -56,12 +56,14 @@ def latest_business_day(days_back=7):
 
 
 def source_market_value_weight():
-    """TaiwanStockMarketValueWeight — 2024-10-30~, 有 weight 欄位"""
+    """TaiwanStockMarketValueWeight — 2024-10-30~
+    真實欄位: rank, stock_id, stock_name, weight_per (float, %), date, type (twse/tpex)
+    """
     print("1. 嘗試 TaiwanStockMarketValueWeight...")
     for d in latest_business_day():
         df = fm("TaiwanStockMarketValueWeight", start=d, end=d)
         if not df.empty:
-            print(f"   ✓ 用日期 {d}, {len(df)} 檔")
+            print(f"   ✓ 用日期 {d}, {len(df)} 檔, columns={list(df.columns)}")
             return df
     return pd.DataFrame()
 
@@ -111,33 +113,39 @@ def main():
 
     print(f"=== 台股市值前 {TOP_N} 大更新 ({datetime.now().strftime('%Y-%m-%d')}) ===\n")
 
-    # 抓資料
+    # 抓資料 — 動態偵測排序欄
+    def pick_col(df, candidates):
+        for c in candidates:
+            if c in df.columns: return c
+        return None
+
     df = source_market_value_weight()
-    weight_col = "weight" if not df.empty and "weight" in df.columns else None
-    if df.empty:
+    weight_col = pick_col(df, ["weight_per", "weight", "TWweight"]) if not df.empty else None
+    if df.empty or weight_col is None:
         df = source_market_value()
-        weight_col = "market_value" if not df.empty and "market_value" in df.columns else None
-    if df.empty:
+        weight_col = pick_col(df, ["MarketValue", "market_value", "value"]) if not df.empty else None
+    if df.empty or weight_col is None:
         df = source_price_times_shares()
         weight_col = "market_value" if not df.empty else None
-    if df.empty:
-        print("❌ 三源都失敗"); sys.exit(1)
+    if df.empty or weight_col is None:
+        print("❌ 三源都失敗或找不到市值欄"); sys.exit(1)
 
     print(f"\n原始 {len(df)} 筆, 用 {weight_col} 排序")
 
     # 統一代號 str
     df["stock_id"] = df["stock_id"].astype(str)
 
-    # 抓名稱(TaiwanStockInfo)
-    print("抓 TaiwanStockInfo 補名稱...")
-    info = fm("TaiwanStockInfo")
-    name_map = {}
-    if not info.empty and "stock_name" in info.columns:
-        info["stock_id"] = info["stock_id"].astype(str)
-        name_map = dict(zip(info["stock_id"], info["stock_name"]))
-
-    # 過濾普通股 + 排序
-    df["名稱"] = df["stock_id"].map(name_map).fillna("")
+    # 名稱: 優先用 dataset 自帶的 stock_name, 否則再抓 TaiwanStockInfo
+    if "stock_name" in df.columns:
+        df["名稱"] = df["stock_name"].fillna("")
+    else:
+        print("抓 TaiwanStockInfo 補名稱...")
+        info = fm("TaiwanStockInfo")
+        name_map = {}
+        if not info.empty and "stock_name" in info.columns:
+            info["stock_id"] = info["stock_id"].astype(str)
+            name_map = dict(zip(info["stock_id"], info["stock_name"]))
+        df["名稱"] = df["stock_id"].map(name_map).fillna("")
     df["is_common"] = df["stock_id"].apply(is_common_stock)
     common = df[df["is_common"]].copy()
     print(f"篩出普通股: {len(common)} 檔")

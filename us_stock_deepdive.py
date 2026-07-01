@@ -488,6 +488,43 @@ def build_xlsx(sym, data, dst):
     return sheets
 
 
+def _entry_section_us(price, ma200, yr_low, tp_low, n):
+    """3:1 盈虧比入場計算段落 (April1Stock 公式)
+    SL = max(MA200, 52w低×1.03), 若 MA200 >= 現價則改用 52w低×1.05
+    TP = 分析師 targetLow (最保守目標)
+    """
+    if not (price and ma200 and yr_low and tp_low and tp_low > 0):
+        return ""
+    sl = max(ma200, yr_low * 1.03)
+    if ma200 >= price:
+        sl = yr_low * 1.05
+    if tp_low <= sl:
+        return f"\n## 🎯 3:1 入場計算\n\n⚠️ TP (${n(tp_low)}) ≤ SL (${n(sl)}) — 分析師目標已跌破支撐, 公式無法計算\n"
+    max_entry = (tp_low + 3 * sl) / 4
+    if price <= sl: verdict = "🚨 已破止損(SL 失守, 重新評估支撐)"
+    elif price <= max_entry: verdict = "🟢 進場區(盈虧比 ≥ 3:1)"
+    elif price <= max_entry * 1.05: verdict = "🟡 接近門檻(<5% 距離)"
+    elif price <= max_entry * 1.15: verdict = "🟠 稍高(等回檔 5-15%)"
+    else: verdict = "🔴 追高風險(掛限價單 Max Entry)"
+    actual_ratio = (tp_low - price) / (price - sl) if price > sl else None
+    dist_pct = round((price / max_entry - 1) * 100, 1)
+    ratio_s = n(actual_ratio) if actual_ratio else "—"
+    return f"""
+## 🎯 3:1 入場計算 (April1Stock 公式)
+
+Max Entry = (TP + 3×SL) / 4 → 現價 ≤ Max Entry 才符合 3:1 盈虧比
+
+| 項目 | 值 | 說明 |
+|---|---:|---|
+| **判讀** | **{verdict}** | |
+| SL 止損 | ${n(sl)} | MA200 或 52w低×1.03 取高 |
+| TP 目標 | ${n(tp_low)} | 分析師最保守 targetLow |
+| **Max Entry** | **${n(max_entry)}** | 現價 ≤ 此值才買 |
+| 現價 | ${n(price)} | 距 Max Entry {'+' if dist_pct > 0 else ''}{dist_pct}% |
+| 實際盈虧比 | {ratio_s} | 目標 ≥ 3.0 |
+"""
+
+
 def build_md(sym, data, dst):
     """Markdown 精華"""
     prof  = first(data.get("profile")) or {}
@@ -554,7 +591,7 @@ def build_md(sym, data, dst):
 - **目標價中位: ${n(tgt.get('targetMedian'))}** ({sig(tgt_diff)}{tgt_diff}% vs 現價)
 - 高 / 低: ${n(tgt.get('targetHigh'))} / ${n(tgt.get('targetLow'))}
 - 華爾街評等 **{grades.get('consensus','—')}**: SB {grades.get('strongBuy',0)} | B {grades.get('buy',0)} | H {grades.get('hold',0)} | S {grades.get('sell',0)}
-
+{_entry_section_us(price, quote.get('priceAvg200'), quote.get('yearLow'), tgt.get('targetLow'), n)}
 ## 🏥 體質
 
 | 項目 | 值 | 判讀 |

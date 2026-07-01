@@ -369,6 +369,44 @@ def build_xlsx(sid, name, data, dst):
     return sheets
 
 
+def _entry_section_tw(price, yr_low, yr_high, num):
+    """3:1 盈虧比入場計算段落 (April1Stock 公式)
+    SL = 52w 低 × 1.03 (前低+3% 當支撐)
+    TP = 52w 高 × 1.05 (前高+5% 目標, 較粗糙)
+    """
+    if not (price and yr_low and yr_high and yr_high > yr_low):
+        return ""
+    sl = yr_low * 1.03
+    tp = yr_high * 1.05
+    if tp <= sl:
+        return ""
+    max_entry = (tp + 3 * sl) / 4
+    if price <= sl: verdict = "🚨 已破止損(SL 失守, 重新評估支撐)"
+    elif price <= max_entry: verdict = "🟢 進場區(盈虧比 ≥ 3:1)"
+    elif price <= max_entry * 1.05: verdict = "🟡 接近門檻(<5% 距離)"
+    elif price <= max_entry * 1.15: verdict = "🟠 稍高(等回檔 5-15%)"
+    else: verdict = "🔴 追高風險(掛限價單 Max Entry)"
+    actual_ratio = (tp - price) / (price - sl) if price > sl else None
+    dist_pct = round((price / max_entry - 1) * 100, 1)
+    ratio_s = num(actual_ratio) if actual_ratio else "—"
+    return f"""
+## 🎯 3:1 入場計算 (April1Stock 公式)
+
+Max Entry = (TP + 3×SL) / 4 → 現價 ≤ Max Entry 才符合 3:1 盈虧比
+
+| 項目 | 值 | 說明 |
+|---|---:|---|
+| **判讀** | **{verdict}** | |
+| SL 止損 | {num(sl)} | 52w 低 × 1.03 |
+| TP 目標 | {num(tp)} | 52w 高 × 1.05 (較粗糙) |
+| **Max Entry** | **{num(max_entry)}** | 現價 ≤ 此值才買 |
+| 現價 | {num(price)} | 距 Max Entry {'+' if dist_pct > 0 else ''}{dist_pct}% |
+| 實際盈虧比 | {ratio_s} | 目標 ≥ 3.0 |
+
+⚠️ 台股 TP 用 52w 高估算, 較樂觀; 實戰請自行核對基本面目標
+"""
+
+
 def build_md(sid, name, data, dst):
     price_1y = data.get("price_1y", pd.DataFrame())
     per = data.get("per", pd.DataFrame())
@@ -457,6 +495,7 @@ def build_md(sid, name, data, dst):
 | 52w 高 | {num(year_high)} | 52w 低 | {num(year_low)} |
 | **PER** | **{num(latest_per)}** | PBR | {num(latest_pbr)} |
 | 殖利率 | {num(div_y)}% | — | — |
+{_entry_section_tw(latest_price, year_low, year_high, num)}
 
 ## 📈 營收動能
 

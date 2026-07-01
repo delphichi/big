@@ -1,0 +1,71 @@
+name: 美股翻轉警報 (內部人 + 國會)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每工作日台北 09:00 (UTC 01:00, 週一至週五)
+    # 美股前一交易日收盤已 20+ 小時, insider/congress 資料已更新
+    - cron: "0 1 * * 1-5"
+
+permissions:
+  contents: write
+
+jobs:
+  flip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install requests pandas openpyxl
+
+      - name: 跑翻轉偵測
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          WORKERS: "6"
+        run: python us_flip_alert.py
+
+      - name: 檢查有無翻轉
+        id: check
+        run: |
+          if [ -s /tmp/us_flip_subject.txt ]; then
+            SUB=$(cat /tmp/us_flip_subject.txt)
+            echo "subject=$SUB" >> $GITHUB_OUTPUT
+            echo "has_flip=yes" >> $GITHUB_OUTPUT
+          else
+            echo "has_flip=no" >> $GITHUB_OUTPUT
+            echo "無翻轉, 不寄 email"
+          fi
+
+      - name: 寄 Gmail (只有翻轉才寄)
+        if: steps.check.outputs.has_flip == 'yes'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: ${{ steps.check.outputs.subject }}
+          html_body: file:///tmp/us_flip_body.html
+          to: delphichi@gmail.com
+          from: 美股翻轉警報 <${{ secrets.GMAIL_USER }}>
+          attachments: data/美股_翻轉警報.xlsx
+          convert_markdown: false
+
+      - name: Commit snapshot
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/美股_翻轉警報.xlsx data/us_flip_alert_prev.json 2>/dev/null || true
+          if git diff --staged --quiet; then echo "無變更"; exit 0; fi
+          git commit -m "data: 美股翻轉警報更新"
+          for i in 1 2 3 4 5; do
+            git fetch origin main -q && git merge origin/main -X ours --no-edit >/dev/null 2>&1
+            git push && { echo pushed; exit 0; }
+            sleep 6
+          done

@@ -1,0 +1,64 @@
+name: 台股外資雷達 (每日)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每工作日台北 08:30 (週一至週五 UTC 00:30)
+    # 週日 20:00 UTC = 週一 04:00 台北 (太早, 改早上)
+    - cron: "30 0 * * 1-5"
+
+permissions:
+  contents: write
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install requests pandas openpyxl
+
+      - name: 跑外資雷達
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          WORKERS: "6"
+        run: python tw_foreign_radar.py
+
+      - name: 讀 subject
+        id: prep
+        run: |
+          SUB=$(cat /tmp/foreign_radar_subject.txt)
+          echo "subject=$SUB" >> $GITHUB_OUTPUT
+
+      - name: 寄 Gmail
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: ${{ steps.prep.outputs.subject }}
+          html_body: file:///tmp/foreign_radar_body.html
+          to: delphichi@gmail.com
+          from: 外資雷達 <${{ secrets.GMAIL_USER }}>
+          attachments: data/台股_外資雷達.xlsx
+          convert_markdown: false
+
+      - name: Commit snapshot
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/台股_外資雷達.xlsx data/foreign_radar_prev.json 2>/dev/null || true
+          if git diff --staged --quiet; then echo "無變更"; exit 0; fi
+          git commit -m "data: 外資雷達更新"
+          for i in 1 2 3 4 5; do
+            git fetch origin main -q && git merge origin/main -X ours --no-edit >/dev/null 2>&1
+            git push && { echo pushed; exit 0; }
+            sleep 6
+          done

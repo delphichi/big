@@ -187,16 +187,21 @@ def build_email(flips, name_map, six_map=None):
         row_style = f"background:{bg}" if bg else ""
         six_info = six_map.get(code, "") if six_map else ""
 
+        def fmt(v):
+            if v is None: return "—"
+            try: return f"{round(v/1000, 0):,.0f}"
+            except: return "—"
+
         body.append(f"<tr style='{row_style}'>"
                     f"<td style='text-align:center'>{severity_str}</td>"
                     f"<td>{code}</td><td>{name_map.get(code,'')}</td>"
                     f"<td>{six_info}</td>"
                     f"<td><b>{f['訊號']}</b></td>"
-                    f"<td style='text-align:right'>{round(f['外資5d(今)']/1000,0):,.0f}</td>"
-                    f"<td style='text-align:right;color:#888'>{round(f['外資5d(昨)']/1000,0):,.0f}</td>"
-                    f"<td style='text-align:right'>{round(f['外資20d(今)']/1000,0):,.0f}</td>"
-                    f"<td style='text-align:right;color:#888'>{round(f['外資20d(昨)']/1000,0):,.0f}</td>"
-                    f"<td style='text-align:right;color:#888'>{round(f['外資60d(今)']/1000,0):,.0f}</td>"
+                    f"<td style='text-align:right'>{fmt(f['外資5d(今)'])}</td>"
+                    f"<td style='text-align:right;color:#888'>{fmt(f['外資5d(昨)'])}</td>"
+                    f"<td style='text-align:right'>{fmt(f['外資20d(今)'])}</td>"
+                    f"<td style='text-align:right;color:#888'>{fmt(f['外資20d(昨)'])}</td>"
+                    f"<td style='text-align:right;color:#888'>{fmt(f['外資60d(今)'])}</td>"
                     f"</tr>")
 
     body.append("</table>")

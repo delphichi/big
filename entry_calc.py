@@ -185,6 +185,8 @@ def batch_us():
     cols = ["代號","現價","SL","TP","Max Entry","實際盈虧比","上檔 %","判讀"]
     print(good[cols].to_string(index=False))
 
+    _write_email("us", good, cols)
+
 
 def batch_tw():
     """對 TW watchlist 全掃"""
@@ -221,6 +223,53 @@ def batch_tw():
     print(f"\n=== 🟢🟡 進場區 / 接近門檻 ({len(good)} 檔) ===")
     cols = ["代號","現價","SL","TP","Max Entry","實際盈虧比","判讀"]
     print(good[cols].to_string(index=False))
+
+    _write_email("tw", good, cols)
+
+
+def _write_email(market, good, cols):
+    """產出 /tmp/entry_signals_{market}_subject.txt + _body.html
+    有 🟢🟡 才寫 subject → workflow 用來判斷是否寄信
+    """
+    label = "美股" if market == "us" else "台股"
+    if len(good) == 0:
+        print(f"⚠️ {label} 無 🟢🟡 進場區檔, 不產 email")
+        return
+
+    subject = f"🎯 {label} 3:1 入場清單 — {len(good)} 檔進場區/接近門檻"
+    with open(f"/tmp/entry_signals_{market}_subject.txt", "w", encoding="utf-8") as f:
+        f.write(subject)
+
+    green = good[good["判讀"].str.contains("🟢", na=False)]
+    yellow = good[good["判讀"].str.contains("🟡", na=False)]
+    sl_src = "MA200 or 52w低×1.03 (取較高)" if market == "us" else "近 6M 低點×1.03"
+    tp_src = "分析師 targetLow (最保守目標)" if market == "us" else "近 6M 高×1.05 (較粗糙)"
+
+    html = f"""<html><body style='font-family:-apple-system,sans-serif;max-width:900px'>
+<h2>{label} 3:1 盈虧比入場清單</h2>
+<p style='color:#666'>公式: Max Entry = (TP + 3×SL) / 4 → 現價 ≤ Max Entry 才符合 3:1</p>
+
+<div style='background:#e8f7e8;padding:10px;border-left:4px solid #2a2'>
+<h3>🟢 進場區 ({len(green)} 檔) — 現價已在 Max Entry 以下</h3>
+{green[cols].to_html(index=False, escape=False) if len(green) else '<p>無</p>'}
+</div>
+
+<div style='background:#fffbe0;padding:10px;border-left:4px solid #fa0;margin-top:12px'>
+<h3>🟡 接近門檻 ({len(yellow)} 檔) — 距 Max Entry &lt;5%, 可掛限價單</h3>
+{yellow[cols].to_html(index=False, escape=False) if len(yellow) else '<p>無</p>'}
+</div>
+
+<div style='background:#f5f5ff;padding:12px;border-left:4px solid #55b;font-size:13px;margin-top:16px'>
+<h4>📖 用法說明</h4>
+<p><b>SL 來源</b>: {sl_src}</p>
+<p><b>TP 來源</b>: {tp_src}</p>
+<p><b>執行</b>: 🟢 直接掛限價單買; 🟡 掛 Max Entry 等回檔</p>
+<p style='color:#c33'><b>注意</b>: SL/TP 自動估算, 實戰請自行核對技術支撐 + 基本面目標</p>
+</div>
+</body></html>"""
+    with open(f"/tmp/entry_signals_{market}_body.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"→ /tmp/entry_signals_{market}_subject.txt + _body.html")
 
 
 def main():

@@ -28,8 +28,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 TOKEN = os.environ.get("FINMIND_TOKEN", "")
 BASE = "https://api.finmindtrade.com/api/v4/data"
-DST = "data/台股_10年財務.xlsx"
-WATCHLIST_FILE = "data/watchlist_tw.txt"
+DST = os.environ.get("DST_FILE", "data/台股_10年財務.xlsx")
+WATCHLIST_FILE = os.environ.get("WATCHLIST_FILE", "data/watchlist_tw.txt")
 WORKERS = int(os.environ.get("WORKERS", "4"))
 
 START_YEAR = int(os.environ.get("START_YEAR", "2016"))

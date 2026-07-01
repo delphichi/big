@@ -18,6 +18,16 @@ on:
         required: false
         default: "2025"
         type: string
+      watchlist_file:
+        description: "watchlist 檔(預設 data/watchlist_tw.txt, 可選 data/watchlist_tw_500.txt)"
+        required: false
+        default: "data/watchlist_tw.txt"
+        type: string
+      dst_file:
+        description: "輸出檔(預設 data/台股_10年財務.xlsx)"
+        required: false
+        default: "data/台股_10年財務.xlsx"
+        type: string
 
 permissions:
   contents: write
@@ -40,6 +50,8 @@ jobs:
           TICKERS: ${{ inputs.tickers }}
           START_YEAR: ${{ inputs.start_year }}
           END_YEAR: ${{ inputs.end_year }}
+          WATCHLIST_FILE: ${{ inputs.watchlist_file }}
+          DST_FILE: ${{ inputs.dst_file }}
           WORKERS: "4"
         run: python tw_10y_financials.py
 
@@ -48,7 +60,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/台股_10年財務.xlsx || true
+          git add "${{ inputs.dst_file }}" || true
           if git diff --staged --quiet; then echo "無變更"; exit 0; fi
           git commit -m "data: 台股 ${{ inputs.start_year }}~${{ inputs.end_year }} 財務更新"
           for i in 1 2 3 4 5; do

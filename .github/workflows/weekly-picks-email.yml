@@ -70,7 +70,9 @@ jobs:
         run: python macro_signals.py || echo "macro_signals 失敗, 用既有"
 
       # ═══════════ 組 email + 寄 ═══════════
-      - name: 9️⃣ 組週報 email
+      - name: 9️⃣ 組週報 email (含外資 20d 快照)
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: python weekly_picks_email.py
 
       - name: 讀 subject

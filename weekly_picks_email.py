@@ -17,9 +17,10 @@
   /tmp/weekly_subject.txt
   /tmp/weekly_body.html
 """
-import os, json
+import os, json, time, requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 TPE = timezone(timedelta(hours=8))
 TODAY = datetime.now(TPE).strftime("%Y-%m-%d")
@@ -31,6 +32,59 @@ US_SRC = "data/美股95檔_六維交叉.xlsx"
 TW_SRC = "data/台股100檔_六維交叉.xlsx"
 MACRO_US = "data/macro_signals.xlsx"
 MACRO_TW = "data/台股_總經儀表板.xlsx"
+
+# 外資 20d 快照用
+FINMIND_TOKEN = os.environ.get("FINMIND_TOKEN", "")
+FM_BASE = "https://api.finmindtrade.com/api/v4/data"
+
+
+def fm(dataset, data_id, start):
+    """FinMind fetcher (輕量)"""
+    p = {"dataset": dataset, "data_id": data_id, "start_date": start}
+    if FINMIND_TOKEN: p["token"] = FINMIND_TOKEN
+    for _ in range(2):
+        try:
+            r = requests.get(FM_BASE, params=p, timeout=15)
+            if r.status_code == 429: time.sleep(3); continue
+            if r.status_code != 200: return pd.DataFrame()
+            return pd.DataFrame(r.json().get("data", []))
+        except Exception: time.sleep(1)
+    return pd.DataFrame()
+
+
+def fetch_foreign_20d(sid):
+    """抓某檔近 30 天 三大法人 wide, 算最近 20 交易日外資淨買賣"""
+    start = (datetime.now(TPE) - timedelta(days=32)).strftime("%Y-%m-%d")
+    df = fm("TaiwanStockInstitutionalInvestorsBuySellWide", data_id=str(sid), start=start)
+    if df.empty: return sid, None
+    df = df.sort_values("date").tail(20)
+    def s(col): return int(df[col].sum()) if col in df.columns else 0
+    f_net = s("Foreign_Investor_buy") - s("Foreign_Investor_sell")
+    t_net = s("Investment_Trust_buy") - s("Investment_Trust_sell")
+    return sid, {"外資20d": f_net, "投信20d": t_net, "days": len(df)}
+
+
+def foreign_20d_batch(codes, workers=6):
+    """對一批代號平行抓 20d 外資淨"""
+    if not FINMIND_TOKEN or not codes: return {}
+    result = {}
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(fetch_foreign_20d, c): c for c in codes}
+        for fut in as_completed(futs):
+            sid, d = fut.result()
+            if d: result[str(sid)] = d
+    return result
+
+
+def foreign_signal(net_shares_k):
+    """外資 20d 判讀 (千股)"""
+    n = net_shares_k
+    if n is None: return ("—", "")
+    if n > 5000: return ("🚀 大買", "background:#c8f5c8")
+    if n > 1000: return ("🟢 加碼", "background:#e5f5e5")
+    if n > -1000: return ("🟡 中性", "background:#fffbe0")
+    if n > -5000: return ("🟠 減碼", "background:#ffe5cc")
+    return ("🔴 大賣", "background:#ffcccc")
 
 
 def load_six_dim(path):
@@ -177,6 +231,31 @@ def main():
         tw_cols = [c for c in ["代號","名稱","評等","品質","分類","籌碼分","1y報酬%","1y超額%","六維分","六維訊號"] if c in tw.columns]
         body.append(render_table(tw.head(10), tw_cols, "🟢 TOP 10", "#e5f5e5"))
         body.append(render_table(tw.tail(5), tw_cols, "🔴 BOTTOM 5", "#ffeaea"))
+
+    # 🌍 台股心動股外資 20d 快照 (TOP10 + BOTTOM5)
+    if not tw.empty and FINMIND_TOKEN:
+        watch_codes = tw.head(10)["代號"].astype(str).tolist() + tw.tail(5)["代號"].astype(str).tolist()
+        print(f"抓 {len(watch_codes)} 檔外資 20d ...")
+        foreign = foreign_20d_batch(watch_codes)
+        if foreign:
+            body.append("<h3 style='margin-top:24px'>🌍 心動股 外資 20 交易日 淨買賣 (千股)</h3>")
+            body.append("<p style='color:#888;font-size:12px'>觀察外資動向,一旦訊號翻紅(🟠🔴)為減碼警訊</p>")
+            body.append("<table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;font-size:13px'>")
+            body.append("<tr style='background:#f0f0f0'><th>代號</th><th>名稱</th><th>六維分</th><th>外資20d</th><th>投信20d</th><th>訊號</th></tr>")
+            name_map = dict(zip(tw["代號"].astype(str), tw.get("名稱", tw["代號"].astype(str))))
+            score_map = dict(zip(tw["代號"].astype(str), tw.get("六維分", pd.Series())))
+            for code in watch_codes:
+                d = foreign.get(str(code))
+                if not d: continue
+                f_net_k = round(d["外資20d"]/1000, 0)
+                t_net_k = round(d["投信20d"]/1000, 0)
+                sig, style = foreign_signal(f_net_k)
+                body.append(f"<tr><td>{code}</td><td>{name_map.get(str(code),'')}</td>"
+                            f"<td>{score_map.get(str(code),'')}</td>"
+                            f"<td style='text-align:right'>{f_net_k:,.0f}</td>"
+                            f"<td style='text-align:right'>{t_net_k:,.0f}</td>"
+                            f"<td style='{style}'>{sig}</td></tr>")
+            body.append("</table>")
 
     # 總經
     body.append(render_macro(macro_us, macro_tw))

@@ -722,10 +722,16 @@ def build_md(sid, name, data, dst):
         latest_mv = mv.sort_values("date").iloc[-1]["market_value"]
 
     rev_yoy = latest_month_rev = None
-    if not mrev.empty:
-        mrs = mrev.sort_values("date")
+    if not mrev.empty and "revenue" in mrev.columns:
+        mrs = mrev.sort_values("date").reset_index(drop=True)
         latest_month_rev = mrs.iloc[-1].get("revenue")
-        rev_yoy = mrs.iloc[-1].get("revenue_year_growth")
+        if len(mrs) >= 13:
+            cur = float(mrs.iloc[-1]["revenue"] or 0)
+            prev = float(mrs.iloc[-13]["revenue"] or 0)
+            if prev > 0:
+                rev_yoy = round((cur / prev - 1) * 100, 1)
+        if rev_yoy is None and "revenue_year_growth" in mrev.columns:
+            rev_yoy = mrs.iloc[-1].get("revenue_year_growth")
 
     def s(df, col): return int(df[col].sum()) if col in df.columns else 0
     f_net = t_net = d_net = 0

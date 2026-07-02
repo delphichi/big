@@ -175,6 +175,18 @@ def build_xlsx(sid, name, data, dst):
     entry = _calc_entry_tw(latest_price, year_low, year_high)
     trend = _foreign_trend_tw(iw, sh)
 
+    # PER 換算 (供概覽用)
+    _inc = data.get("income", pd.DataFrame())
+    per_md, per_df = _per_band_tw(latest_price, _inc)
+    per_summary = None
+    if per_df is not None and not per_df.empty:
+        eps_4q_rows = _inc[_inc["type"] == "EPS"].sort_values("date", ascending=False).head(4)
+        eps_4q = round(float(eps_4q_rows["value"].sum()), 2)
+        per_summary = {"eps_4q": eps_4q,
+                       "cur_pe": round(latest_price / eps_4q, 1) if eps_4q > 0 else None,
+                       "fair_22x": round(eps_4q * 22, 2) if eps_4q > 0 else None,
+                       "conservative_18x": round(eps_4q * 18, 2) if eps_4q > 0 else None}
+
     # === 概覽 ===
     ov = [
         ("代號", sid), ("名稱", name), ("產業", industry_str),
@@ -194,6 +206,11 @@ def build_xlsx(sid, name, data, dst):
         ("Max Entry", entry["max_entry"] if entry else None),
         ("距 Max Entry %", entry["dist_pct"] if entry else None),
         ("實際盈虧比", entry["ratio"] if entry else None),
+        ("─── PER × EPS 換算 ───", ""),
+        ("近 4Q EPS", per_summary["eps_4q"] if per_summary else None),
+        ("現價對應 PER", per_summary["cur_pe"] if per_summary else None),
+        ("保守 18x 合理價", per_summary["conservative_18x"] if per_summary else None),
+        ("中間 22x 合理價", per_summary["fair_22x"] if per_summary else None),
         ("─── 事件雷達 ───", ""),
         ("外資 5d 淨(千股)", round(trend["f5"]/1000, 0) if trend["f5"] is not None else None),
         ("外資 20d 淨(千股)", round(trend["f20"]/1000, 0) if trend["f20"] is not None else None),
@@ -226,7 +243,7 @@ def build_xlsx(sid, name, data, dst):
         sheets["月營收10Y"] = m[keep_cols].sort_values("date", ascending=False)
 
     # === 損益季 10Y (pivot) ===
-    inc = data.get("income", pd.DataFrame())
+    inc = _inc
     if not inc.empty and "type" in inc.columns:
         keep = ["Revenue","CostOfGoodsSold","GrossProfit","OperatingExpenses",
                 "OperatingIncome","IncomeAfterTaxes","EPS",
@@ -236,6 +253,10 @@ def build_xlsx(sid, name, data, dst):
         if not i2.empty:
             piv = i2.pivot_table(index="date", columns="type", values="value", aggfunc="last")
             sheets["損益季10Y"] = piv.sort_index(ascending=False).reset_index()
+
+    # === PER 換算 ===
+    if per_df is not None:
+        sheets["PER換算"] = per_df
 
     # === 資產負債季 ===
     bs = data.get("bs", pd.DataFrame())
@@ -486,6 +507,48 @@ def _summary_action_tw(entry, trend):
     return md
 
 
+def _per_band_tw(price, inc):
+    """PER × 近 4Q EPS 換算價. 返回 (md_str, df) 或 (None, None)"""
+    if inc.empty or "type" not in inc.columns:
+        return None, None
+    eps_rows = inc[inc["type"] == "EPS"].sort_values("date", ascending=False)
+    if len(eps_rows) < 4 or not price:
+        return None, None
+    eps_4q = float(eps_rows.head(4)["value"].sum())
+    if eps_4q <= 0:
+        return None, None
+    bands = [10, 14, 18, 22, 26, 30]
+    rows = []
+    for pe in bands:
+        tgt = round(eps_4q * pe, 2)
+        diff = round((price / tgt - 1) * 100, 1)
+        if diff < -20:   v = "🟢 大幅低估"
+        elif diff < -5:  v = "🟢 低估"
+        elif diff < 5:   v = "🟡 合理"
+        elif diff < 20:  v = "🟠 高估"
+        else:            v = "🔴 大幅高估"
+        rows.append({"PER 倍": f"{pe}x", "對應價": tgt, "距現價 %": diff, "判讀": v})
+    df = pd.DataFrame(rows)
+    cur_pe = round(price / eps_4q, 1)
+    md = f"""
+## 📊 PER 換算價 (基於近 4Q EPS)
+
+- 近 4Q EPS 合計: **{eps_4q:.2f}** 元
+- 現價 {price} → 對應 **PER {cur_pe}x**
+
+| PER | 對應價 | 距現價 % | 判讀 |
+|---:|---:|---:|---|
+"""
+    for r in rows:
+        s = '+' if r['距現價 %'] > 0 else ''
+        md += f"| {r['PER 倍']} | {r['對應價']} | {s}{r['距現價 %']}% | {r['判讀']} |\n"
+    md += """
+⚠️ 假設 EPS 維持. 若 EPS 加速成長 → 高倍數也合理; 若衰退 → 低倍數才安全
+💡 3:1 (技術/籌碼) vs PER (基本面/估值) 兩個視角常會給出不同答案 — 用來 cross check
+"""
+    return md, df
+
+
 def _entry_section_tw(price, yr_low, yr_high, num):
     """3:1 盈虧比入場計算段落 (April1Stock 公式)"""
     e = _calc_entry_tw(price, yr_low, yr_high)
@@ -600,6 +663,7 @@ def build_md(sid, name, data, dst):
 | 殖利率 | {num(div_y)}% | — | — |
 {_event_radar_tw_md(_calc_entry_tw(latest_price, year_low, year_high), _foreign_trend_tw(iw, sh))}
 {_entry_section_tw(latest_price, year_low, year_high, num)}
+{_per_band_tw(latest_price, data.get('income', pd.DataFrame()))[0] or ''}
 
 ## 📈 營收動能
 

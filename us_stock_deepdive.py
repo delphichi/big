@@ -221,9 +221,18 @@ def build_xlsx(sym, data, dst):
         ("華爾街共識", grades.get("consensus")),
     ]
 
-    # 3:1 入場 + 事件雷達
+    # 3:1 入場 + 事件雷達 + PER 換算
     entry = _calc_entry_us(price, quote.get("priceAvg200"), quote.get("yearLow"), tgt.get("targetLow"))
     sig = _us_signals(data)
+    per_md, per_df = _per_band_us(price, data)
+    per_eps = per_cur_pe = per_fair_20x = per_conservative_15x = None
+    if per_df is not None and not per_df.empty:
+        b15 = per_df[per_df["PER 倍"] == "15x"]
+        b20 = per_df[per_df["PER 倍"] == "20x"]
+        per_conservative_15x = float(b15.iloc[0]["對應價"]) if len(b15) else None
+        per_fair_20x = float(b20.iloc[0]["對應價"]) if len(b20) else None
+        per_eps = round(per_fair_20x / 20, 2) if per_fair_20x else None
+        per_cur_pe = round(price / per_eps, 1) if per_eps and price else None
     ov.extend([
         ("─── 3:1 入場 ───", ""),
         ("3:1 判讀", entry["verdict"] if entry else None),
@@ -238,8 +247,15 @@ def build_xlsx(sym, data, dst):
         ("國會 90d 買筆", sig["cong_buy"]),
         ("國會 90d 賣筆", sig["cong_sell"]),
         ("國會訊號", sig["cong_signal"]),
+        ("─── PER × EPS 換算 ───", ""),
+        ("TTM EPS", per_eps),
+        ("現價對應 PER", per_cur_pe),
+        ("保守 15x 合理價", per_conservative_15x),
+        ("中間 20x 合理價", per_fair_20x),
     ])
     sheets["概覽"] = pd.DataFrame(ov, columns=["項目","值"])
+    if per_df is not None:
+        sheets["PER換算"] = per_df
 
     # === 損益 10Y ===
     inc = data.get("income") or []
@@ -613,6 +629,54 @@ def _summary_action_us(entry, sig):
     return md
 
 
+def _per_band_us(price, data):
+    """PER × TTM EPS 換算價. 返回 (md, df) 或 (None, None)"""
+    rttm = first(data.get("ratios_ttm")) or {}
+    kmttm = first(data.get("km_ttm")) or {}
+    eps = None
+    for k in ("netIncomePerShareTTM", "earningsPerShareTTM", "epsTTM"):
+        v = kmttm.get(k) or rttm.get(k)
+        if v: eps = float(v); break
+    if not eps and rttm.get("priceToEarningsRatioTTM") and price:
+        pe = float(rttm["priceToEarningsRatioTTM"])
+        if pe > 0: eps = price / pe
+    if not eps:
+        inc = data.get("income") or []
+        if inc and inc[0].get("eps"): eps = float(inc[0]["eps"])
+    if not eps or eps <= 0 or not price:
+        return None, None
+    bands = [10, 15, 20, 25, 30, 40]
+    rows = []
+    for pe in bands:
+        tgt = round(eps * pe, 2)
+        diff = round((price / tgt - 1) * 100, 1)
+        if diff < -20:   v = "🟢 大幅低估"
+        elif diff < -5:  v = "🟢 低估"
+        elif diff < 5:   v = "🟡 合理"
+        elif diff < 20:  v = "🟠 高估"
+        else:            v = "🔴 大幅高估"
+        rows.append({"PER 倍": f"{pe}x", "對應價": tgt, "距現價 %": diff, "判讀": v})
+    df = pd.DataFrame(rows)
+    cur_pe = round(price / eps, 1)
+    md = f"""
+## 📊 PER 換算價 (基於 TTM EPS)
+
+- TTM EPS: **${eps:.2f}**
+- 現價 ${price} → 對應 **PER {cur_pe}x**
+
+| PER | 對應價 | 距現價 % | 判讀 |
+|---:|---:|---:|---|
+"""
+    for r in rows:
+        s = '+' if r['距現價 %'] > 0 else ''
+        md += f"| {r['PER 倍']} | ${r['對應價']} | {s}{r['距現價 %']}% | {r['判讀']} |\n"
+    md += """
+⚠️ 假設 EPS 維持. 若 EPS 加速成長 → 高倍數也合理; 若衰退 → 低倍數才安全
+💡 3:1 (技術) vs PER (估值) 兩個視角常會給出不同答案 — 用來 cross check
+"""
+    return md, df
+
+
 def _entry_section_us(price, ma200, yr_low, tp_low, n):
     """3:1 盈虧比入場計算段落 (April1Stock 公式)"""
     e = _calc_entry_us(price, ma200, yr_low, tp_low)
@@ -706,6 +770,7 @@ def build_md(sym, data, dst):
 - 華爾街評等 **{grades.get('consensus','—')}**: SB {grades.get('strongBuy',0)} | B {grades.get('buy',0)} | H {grades.get('hold',0)} | S {grades.get('sell',0)}
 {_event_radar_us_md(_calc_entry_us(price, quote.get('priceAvg200'), quote.get('yearLow'), tgt.get('targetLow')), _us_signals(data))}
 {_entry_section_us(price, quote.get('priceAvg200'), quote.get('yearLow'), tgt.get('targetLow'), n)}
+{_per_band_us(price, data)[0] or ''}
 ## 🏥 體質
 
 | 項目 | 值 | 判讀 |

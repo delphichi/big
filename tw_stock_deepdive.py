@@ -180,6 +180,19 @@ def build_xlsx(sid, name, data, dst):
     entry = _calc_entry_tw(latest_price, year_low, year_high)
     trend = _foreign_trend_tw(iw, sh)
 
+    # 週期股識別
+    cagr_5y = _cagr_5y_tw(mrev)
+    cyc = _detect_cyclical_tw(year_high, year_low, cagr_5y, rev_yoy)
+    _mid_eps = None
+    _mid_pe = None
+    _inc_tmp = data.get("income", pd.DataFrame())
+    if not _inc_tmp.empty and "type" in _inc_tmp.columns:
+        _eps_r = _inc_tmp[_inc_tmp["type"] == "EPS"].sort_values("date", ascending=False).head(8)
+        if len(_eps_r) >= 4:
+            _mid_eps = round(float(_eps_r["value"].mean() * 4), 2)
+            if _mid_eps > 0 and latest_price:
+                _mid_pe = round(latest_price / _mid_eps, 1)
+
     # PER 換算 + 混合版 3:1 (供概覽用)
     _inc = data.get("income", pd.DataFrame())
     per_md, per_df = _per_band_tw(latest_price, _inc)
@@ -205,6 +218,12 @@ def build_xlsx(sid, name, data, dst):
         ("─── 動能 ───", ""),
         ("最新月營收(億)", round((latest_month_rev or 0)/1e8, 1) if latest_month_rev else None),
         ("月營收 YoY%", rev_yoy),
+        ("營收 5y CAGR%", cagr_5y),
+        ("─── 週期股標記 ───", ""),
+        ("週期股類型", cyc["severity"] if cyc else "非週期股"),
+        ("52w 高低比", cyc["ratio"] if cyc else round(year_high/year_low, 1) if year_high and year_low else None),
+        ("Mid-cycle EPS (8Q 均年化)", _mid_eps),
+        ("現價 vs Mid-cycle PER", _mid_pe),
         ("─── 3:1 入場 ───", ""),
         ("3:1 判讀", entry["verdict"] if entry else None),
         ("SL 止損", entry["sl"] if entry else None),
@@ -523,6 +542,88 @@ def _summary_action_tw(entry, trend):
     return md
 
 
+def _cagr_5y_tw(mrev):
+    """從月營收算 5y CAGR, 沒足夠資料回 None"""
+    if mrev.empty or "revenue" not in mrev.columns:
+        return None
+    m = mrev.copy()
+    m["year"] = m["date"].astype(str).str[:4]
+    yearly = m.groupby("year").agg(rev=("revenue","sum"), months=("date","count"))
+    yearly = yearly[yearly["months"] >= 12].sort_index()
+    if len(yearly) <= 5: return None
+    latest_v = yearly.iloc[-1]["rev"]
+    start_v = yearly.iloc[-6]["rev"]
+    if start_v > 0 and latest_v > 0:
+        return round(((latest_v/start_v)**(1/5) - 1) * 100, 1)
+    return None
+
+
+def _detect_cyclical_tw(yr_high, yr_low, cagr_5y, latest_yoy):
+    """檢測週期股. 返回 dict 或 None
+    條件 (任一觸發):
+    - 52w 高低比 > 3 (振幅極大)
+    - 5y CAGR ≤ 5% AND 月營收 YoY > 100% (谷底→復甦)
+    """
+    if not (yr_high and yr_low and yr_low > 0):
+        return None
+    ratio = yr_high / yr_low
+    reasons = []
+    if ratio > 3:
+        reasons.append(f"52w 高低比 **{ratio:.1f}x** (> 3, 極端波動)")
+    if (cagr_5y is not None and cagr_5y <= 5
+        and latest_yoy is not None and latest_yoy > 100):
+        reasons.append(f"5y CAGR **{cagr_5y}%** + 月營收 YoY **{latest_yoy}%** (谷底復甦)")
+    if not reasons:
+        return None
+    severity = "🌊🌊 強週期股" if ratio > 5 else "🌊 週期股"
+    return {"severity": severity, "ratio": round(ratio, 1), "reasons": reasons}
+
+
+def _cyclical_warning_tw_md(cyc, price, inc, num):
+    """週期股警告段 + mid-cycle EPS 估算"""
+    if not cyc:
+        return ""
+    mid_cycle_eps = cur_pe_mid = t15 = t20 = None
+    if not inc.empty and "type" in inc.columns:
+        eps_rows = inc[inc["type"] == "EPS"].sort_values("date", ascending=False).head(8)
+        if len(eps_rows) >= 4:
+            mid_cycle_eps = round(float(eps_rows["value"].mean() * 4), 2)
+            if mid_cycle_eps > 0 and price:
+                cur_pe_mid = round(price / mid_cycle_eps, 1)
+                t15 = round(mid_cycle_eps * 15, 2)
+                t20 = round(mid_cycle_eps * 20, 2)
+
+    md = f"\n## {cyc['severity']} 警告 — 標準工具會失真\n\n**觸發條件**:\n"
+    for r in cyc["reasons"]:
+        md += f"- {r}\n"
+    md += """
+**為什麼 3:1 / PER 換算會失真**:
+- **52w 低** 是週期谷底價 (可能包含近破產風險) → 拿來當 SL 沒意義
+- **近 4Q EPS** 是週期高峰 EPS → 乘 PER 會過度樂觀
+- 上方 3:1 / PER 表格看看就好, **不要當進場信號**
+"""
+    if mid_cycle_eps and cur_pe_mid:
+        md += f"""
+**Mid-cycle EPS 估算** (近 8 季 EPS 平均, 年化):
+
+| 項目 | 值 |
+|---|---:|
+| Mid-cycle EPS | **{num(mid_cycle_eps)}** |
+| 現價對應 mid-cycle PER | **{cur_pe_mid}x** |
+| Mid-cycle 15x 合理價 | {num(t15)} |
+| Mid-cycle 20x 合理價 | {num(t20)} |
+
+判讀: {'🔴 現價 mid-cycle PER 極端高 (> 25x), 週期反轉風險大' if cur_pe_mid > 25 else '🟠 現價 mid-cycle PER 偏高' if cur_pe_mid > 20 else '🟡 現價 mid-cycle PER 合理' if cur_pe_mid > 12 else '🟢 現價 mid-cycle PER 便宜'}
+"""
+    md += """
+**更適合週期股的指標**:
+1. **PBR** vs 5 年中位 (週期股 PBR 通常震盪明確)
+2. **同業股價**(週期領先者已先反映)
+3. **產業景氣領先指標** (DRAM 現貨價 / BDI 波羅的海指數 / 面板價 等)
+"""
+    return md
+
+
 def _calc_entry_tw_hybrid(price, yr_high, price_1y, inc,
                           pe_floor=15, pe_cap=26, months_recent=3):
     """3:1 混合版: 加基本面上下限
@@ -780,6 +881,7 @@ def build_md(sid, name, data, dst):
 | 52w 高 | {num(year_high)} | 52w 低 | {num(year_low)} |
 | **PER** | **{num(latest_per)}** | PBR | {num(latest_pbr)} |
 | 殖利率 | {num(div_y)}% | — | — |
+{_cyclical_warning_tw_md(_detect_cyclical_tw(year_high, year_low, _cagr_5y_tw(mrev), rev_yoy), latest_price, data.get('income', pd.DataFrame()), num)}
 {_event_radar_tw_md(_calc_entry_tw(latest_price, year_low, year_high), _foreign_trend_tw(iw, sh))}
 {_entry_section_tw(latest_price, year_low, year_high, num)}
 {_per_band_tw(latest_price, data.get('income', pd.DataFrame()))[0] or ''}

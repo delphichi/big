@@ -220,6 +220,25 @@ def build_xlsx(sym, data, dst):
         ("Sell", grades.get("sell")),
         ("華爾街共識", grades.get("consensus")),
     ]
+
+    # 3:1 入場 + 事件雷達
+    entry = _calc_entry_us(price, quote.get("priceAvg200"), quote.get("yearLow"), tgt.get("targetLow"))
+    sig = _us_signals(data)
+    ov.extend([
+        ("─── 3:1 入場 ───", ""),
+        ("3:1 判讀", entry["verdict"] if entry else None),
+        ("SL 止損", entry["sl"] if entry else None),
+        ("TP 目標", entry["tp"] if entry else None),
+        ("Max Entry", entry["max_entry"] if entry else None),
+        ("距 Max Entry %", entry["dist_pct"] if entry else None),
+        ("實際盈虧比", entry["ratio"] if entry else None),
+        ("─── 事件雷達 ───", ""),
+        ("內部人 4Q 買賣比", sig["insider_ratio"]),
+        ("內部人訊號", sig["insider_signal"]),
+        ("國會 90d 買筆", sig["cong_buy"]),
+        ("國會 90d 賣筆", sig["cong_sell"]),
+        ("國會訊號", sig["cong_signal"]),
+    ])
     sheets["概覽"] = pd.DataFrame(ov, columns=["項目","值"])
 
     # === 損益 10Y ===
@@ -488,27 +507,121 @@ def build_xlsx(sym, data, dst):
     return sheets
 
 
-def _entry_section_us(price, ma200, yr_low, tp_low, n):
-    """3:1 盈虧比入場計算段落 (April1Stock 公式)
-    SL = max(MA200, 52w低×1.03), 若 MA200 >= 現價則改用 52w低×1.05
-    TP = 分析師 targetLow (最保守目標)
-    """
+def _calc_entry_us(price, ma200, yr_low, tp_low):
+    """3:1 計算, 返回 dict 或 None"""
     if not (price and ma200 and yr_low and tp_low and tp_low > 0):
-        return ""
+        return None
     sl = max(ma200, yr_low * 1.03)
     if ma200 >= price:
         sl = yr_low * 1.05
     if tp_low <= sl:
-        return f"\n## 🎯 3:1 入場計算\n\n⚠️ TP (${n(tp_low)}) ≤ SL (${n(sl)}) — 分析師目標已跌破支撐, 公式無法計算\n"
+        return None
     max_entry = (tp_low + 3 * sl) / 4
-    if price <= sl: verdict = "🚨 已破止損(SL 失守, 重新評估支撐)"
-    elif price <= max_entry: verdict = "🟢 進場區(盈虧比 ≥ 3:1)"
-    elif price <= max_entry * 1.05: verdict = "🟡 接近門檻(<5% 距離)"
-    elif price <= max_entry * 1.15: verdict = "🟠 稍高(等回檔 5-15%)"
-    else: verdict = "🔴 追高風險(掛限價單 Max Entry)"
-    actual_ratio = (tp_low - price) / (price - sl) if price > sl else None
+    if price <= sl: verdict = "🚨 已破止損(SL 失守)"
+    elif price <= max_entry: verdict = "🟢 進場區(≥3:1)"
+    elif price <= max_entry * 1.05: verdict = "🟡 接近門檻(<5%)"
+    elif price <= max_entry * 1.15: verdict = "🟠 稍高(5-15%)"
+    else: verdict = "🔴 追高風險(>15%)"
+    ratio = round((tp_low - price) / (price - sl), 2) if price > sl else None
     dist_pct = round((price / max_entry - 1) * 100, 1)
-    ratio_s = n(actual_ratio) if actual_ratio else "—"
+    return {"sl": round(sl, 2), "tp": round(tp_low, 2), "max_entry": round(max_entry, 2),
+            "verdict": verdict, "ratio": ratio, "dist_pct": dist_pct}
+
+
+def _us_signals(data):
+    """內部人 4Q 買賣比 + 國會 90d 淨"""
+    from datetime import datetime, timedelta
+    out = {"insider_ratio": None, "insider_signal": None,
+           "cong_buy": 0, "cong_sell": 0, "cong_signal": None}
+    ist = data.get("insider_stats") or []
+    if ist:
+        recent = ist[:4]
+        buy = sum(float(r.get("totalAcquired") or 0) for r in recent)
+        sell = sum(float(r.get("totalDisposed") or 0) for r in recent)
+        if sell > 0:
+            r = round(buy / sell, 2)
+            out["insider_ratio"] = r
+            if r < 0.05:   out["insider_signal"] = "🔴 極端賣"
+            elif r < 0.3:  out["insider_signal"] = "🟠 賣壓"
+            elif r > 5:    out["insider_signal"] = "🟢 極端買"
+            elif r > 2:    out["insider_signal"] = "🟡 買方"
+            else:          out["insider_signal"] = "⚪ 中性"
+    cutoff = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+    for tx in (data.get("senate") or []) + (data.get("house") or []):
+        d = tx.get("transactionDate", "") or ""
+        if d < cutoff: continue
+        t = (tx.get("type") or "").lower()
+        if "purchase" in t or t == "buy": out["cong_buy"] += 1
+        elif "sale" in t or t == "sell": out["cong_sell"] += 1
+    net = out["cong_buy"] - out["cong_sell"]
+    total = out["cong_buy"] + out["cong_sell"]
+    if total == 0: out["cong_signal"] = None
+    elif net >= 3:  out["cong_signal"] = "🟢 強買"
+    elif net >= 1:  out["cong_signal"] = "🟡 買方"
+    elif net <= -3: out["cong_signal"] = "🔴 強賣"
+    elif net <= -1: out["cong_signal"] = "🟠 賣方"
+    else:           out["cong_signal"] = "⚪ 中性"
+    return out
+
+
+def _event_radar_us_md(entry, sig):
+    lines = ["\n## 🚨 事件雷達 (3:1 + 內部人 + 國會)\n",
+             "| 訊號 | 值 | 判讀 |", "|---|---:|---|"]
+    has = False
+    if entry:
+        lines.append(f"| **3:1 判讀** | 距 Max Entry {entry['dist_pct']:+.1f}% | **{entry['verdict']}** |")
+        has = True
+    if sig["insider_ratio"] is not None:
+        lines.append(f"| 內部人 4Q 買賣比 | {sig['insider_ratio']} | {sig['insider_signal']} |")
+        has = True
+    if sig["cong_signal"]:
+        lines.append(f"| 國會 90d (買/賣筆數) | {sig['cong_buy']}/{sig['cong_sell']} | {sig['cong_signal']} |")
+        has = True
+    return "\n".join(lines) + "\n" if has else ""
+
+
+def _summary_action_us(entry, sig):
+    if not entry:
+        return ""
+    md = f"""
+---
+
+## 🎯 綜合判讀 / 事件行動
+
+### 進場策略 (3:1 派)
+- **限價買**: ${entry['max_entry']}
+- **止損**: ${entry['sl']} (跌破止損, 重新評估)
+- **目標**: ${entry['tp']}
+- **當前判讀**: {entry['verdict']}
+"""
+    warnings = []
+    if sig["insider_signal"] and "🔴" in sig["insider_signal"]:
+        warnings.append(f"內部人 {sig['insider_signal']} (4Q 買賣比 {sig['insider_ratio']})")
+    if sig["cong_signal"] and "🔴" in sig["cong_signal"]:
+        warnings.append(f"國會 {sig['cong_signal']} (買 {sig['cong_buy']} / 賣 {sig['cong_sell']})")
+    if warnings:
+        md += "\n### 🚨 短期警訊\n" + "\n".join(f"- {w}" for w in warnings) + "\n"
+    md += """
+### 撤退訊號 (任一觸發即檢討)
+1. EPS 連 2 季 QoQ 下滑
+2. 內部人 4Q 買賣比跌破 0.1 (內部人賣壓極端)
+3. 分析師目標中位下調 > 10%
+4. 股價跌破 SL
+
+⚠️ 3:1 SL 用 MA200/52w低 較高者, TP 用分析師最保守 targetLow, 實戰請自行核對技術支撐
+"""
+    return md
+
+
+def _entry_section_us(price, ma200, yr_low, tp_low, n):
+    """3:1 盈虧比入場計算段落 (April1Stock 公式)"""
+    e = _calc_entry_us(price, ma200, yr_low, tp_low)
+    if not e:
+        if price and ma200 and yr_low and tp_low and tp_low > 0:
+            sl = max(ma200, yr_low * 1.03)
+            return f"\n## 🎯 3:1 入場計算\n\n⚠️ TP (${n(tp_low)}) ≤ SL (${n(sl)}) — 分析師目標已跌破支撐, 公式無法計算\n"
+        return ""
+    ratio_s = n(e["ratio"]) if e["ratio"] is not None else "—"
     return f"""
 ## 🎯 3:1 入場計算 (April1Stock 公式)
 
@@ -516,11 +629,11 @@ Max Entry = (TP + 3×SL) / 4 → 現價 ≤ Max Entry 才符合 3:1 盈虧比
 
 | 項目 | 值 | 說明 |
 |---|---:|---|
-| **判讀** | **{verdict}** | |
-| SL 止損 | ${n(sl)} | MA200 或 52w低×1.03 取高 |
-| TP 目標 | ${n(tp_low)} | 分析師最保守 targetLow |
-| **Max Entry** | **${n(max_entry)}** | 現價 ≤ 此值才買 |
-| 現價 | ${n(price)} | 距 Max Entry {'+' if dist_pct > 0 else ''}{dist_pct}% |
+| **判讀** | **{e['verdict']}** | |
+| SL 止損 | ${n(e['sl'])} | MA200 或 52w低×1.03 取高 |
+| TP 目標 | ${n(e['tp'])} | 分析師最保守 targetLow |
+| **Max Entry** | **${n(e['max_entry'])}** | 現價 ≤ 此值才買 |
+| 現價 | ${n(price)} | 距 Max Entry {'+' if e['dist_pct'] > 0 else ''}{e['dist_pct']}% |
 | 實際盈虧比 | {ratio_s} | 目標 ≥ 3.0 |
 """
 
@@ -591,6 +704,7 @@ def build_md(sym, data, dst):
 - **目標價中位: ${n(tgt.get('targetMedian'))}** ({sig(tgt_diff)}{tgt_diff}% vs 現價)
 - 高 / 低: ${n(tgt.get('targetHigh'))} / ${n(tgt.get('targetLow'))}
 - 華爾街評等 **{grades.get('consensus','—')}**: SB {grades.get('strongBuy',0)} | B {grades.get('buy',0)} | H {grades.get('hold',0)} | S {grades.get('sell',0)}
+{_event_radar_us_md(_calc_entry_us(price, quote.get('priceAvg200'), quote.get('yearLow'), tgt.get('targetLow')), _us_signals(data))}
 {_entry_section_us(price, quote.get('priceAvg200'), quote.get('yearLow'), tgt.get('targetLow'), n)}
 ## 🏥 體質
 
@@ -661,6 +775,10 @@ def build_md(sym, data, dst):
         md += "\n## 📰 最新新聞\n\n"
         for x in news[:5]:
             md += f"- [{x.get('title','')}]({x.get('url','')}) — *{x.get('publisher','')} ({(x.get('publishedDate') or '')[:10]})*\n"
+
+    md += _summary_action_us(
+        _calc_entry_us(price, quote.get('priceAvg200'), quote.get('yearLow'), tgt.get('targetLow')),
+        _us_signals(data))
 
     md += f"\n\n---\n\n_資料源: FMP • 生成 {datetime.now().strftime('%Y-%m-%d %H:%M')}_\n"
 

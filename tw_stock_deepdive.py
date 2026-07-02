@@ -171,6 +171,10 @@ def build_xlsx(sid, name, data, dst):
     disp_count = len(data.get("disp", pd.DataFrame()))
     suspend_count = len(data.get("suspend", pd.DataFrame()))
 
+    # 3:1 入場 + 事件雷達 (供概覽用)
+    entry = _calc_entry_tw(latest_price, year_low, year_high)
+    trend = _foreign_trend_tw(iw, sh)
+
     # === 概覽 ===
     ov = [
         ("代號", sid), ("名稱", name), ("產業", industry_str),
@@ -183,6 +187,18 @@ def build_xlsx(sid, name, data, dst):
         ("─── 動能 ───", ""),
         ("最新月營收(億)", round((latest_month_rev or 0)/1e8, 1) if latest_month_rev else None),
         ("月營收 YoY%", rev_yoy),
+        ("─── 3:1 入場 ───", ""),
+        ("3:1 判讀", entry["verdict"] if entry else None),
+        ("SL 止損", entry["sl"] if entry else None),
+        ("TP 目標", entry["tp"] if entry else None),
+        ("Max Entry", entry["max_entry"] if entry else None),
+        ("距 Max Entry %", entry["dist_pct"] if entry else None),
+        ("實際盈虧比", entry["ratio"] if entry else None),
+        ("─── 事件雷達 ───", ""),
+        ("外資 5d 淨(千股)", round(trend["f5"]/1000, 0) if trend["f5"] is not None else None),
+        ("外資 20d 淨(千股)", round(trend["f20"]/1000, 0) if trend["f20"] is not None else None),
+        ("外資 5d↔20d", trend["flip"] or "同向"),
+        ("外資持股 5d 變化 (pp)", trend["sh_change"]),
         ("─── 籌碼 90d ───", ""),
         ("外資淨(千股)", round((f_net or 0)/1000, 0) if f_net else None),
         ("投信淨(千股)", round((t_net or 0)/1000, 0) if t_net else None),
@@ -369,26 +385,113 @@ def build_xlsx(sid, name, data, dst):
     return sheets
 
 
-def _entry_section_tw(price, yr_low, yr_high, num):
-    """3:1 盈虧比入場計算段落 (April1Stock 公式)
-    SL = 52w 低 × 1.03 (前低+3% 當支撐)
-    TP = 52w 高 × 1.05 (前高+5% 目標, 較粗糙)
+def _calc_entry_tw(price, yr_low, yr_high):
+    """3:1 計算, 返回 dict 或 None
+    SL = 52w 低 × 1.03, TP = 52w 高 × 1.05
     """
     if not (price and yr_low and yr_high and yr_high > yr_low):
-        return ""
+        return None
     sl = yr_low * 1.03
     tp = yr_high * 1.05
     if tp <= sl:
-        return ""
+        return None
     max_entry = (tp + 3 * sl) / 4
-    if price <= sl: verdict = "🚨 已破止損(SL 失守, 重新評估支撐)"
-    elif price <= max_entry: verdict = "🟢 進場區(盈虧比 ≥ 3:1)"
-    elif price <= max_entry * 1.05: verdict = "🟡 接近門檻(<5% 距離)"
-    elif price <= max_entry * 1.15: verdict = "🟠 稍高(等回檔 5-15%)"
-    else: verdict = "🔴 追高風險(掛限價單 Max Entry)"
-    actual_ratio = (tp - price) / (price - sl) if price > sl else None
+    if price <= sl: verdict = "🚨 已破止損(SL 失守)"
+    elif price <= max_entry: verdict = "🟢 進場區(≥3:1)"
+    elif price <= max_entry * 1.05: verdict = "🟡 接近門檻(<5%)"
+    elif price <= max_entry * 1.15: verdict = "🟠 稍高(5-15%)"
+    else: verdict = "🔴 追高風險(>15%)"
+    ratio = round((tp - price) / (price - sl), 2) if price > sl else None
     dist_pct = round((price / max_entry - 1) * 100, 1)
-    ratio_s = num(actual_ratio) if actual_ratio else "—"
+    return {"sl": round(sl, 2), "tp": round(tp, 2), "max_entry": round(max_entry, 2),
+            "verdict": verdict, "ratio": ratio, "dist_pct": dist_pct}
+
+
+def _foreign_trend_tw(iw, sh):
+    """外資 5d/20d 動向 + 持股 % 5d 變化
+    返回 dict: {f5, f20, flip, sh_change}
+    """
+    out = {"f5": None, "f20": None, "flip": None, "sh_change": None}
+    if not iw.empty and "Foreign_Investor_buy" in iw.columns and "Foreign_Investor_sell" in iw.columns:
+        iw_s = iw.sort_values("date", ascending=False)
+        def net(df, n):
+            head = df.head(n)
+            return int((head["Foreign_Investor_buy"].fillna(0)
+                        - head["Foreign_Investor_sell"].fillna(0)).sum())
+        if len(iw_s) >= 5:  out["f5"]  = net(iw_s, 5)
+        if len(iw_s) >= 20: out["f20"] = net(iw_s, 20)
+        if out["f5"] is not None and out["f20"] is not None:
+            if out["f5"] < 0 < out["f20"]:
+                out["flip"] = "🚨 5d 轉賣 (背離 20d)"
+            elif out["f5"] > 0 > out["f20"]:
+                out["flip"] = "🟢 5d 轉買 (背離 20d)"
+    if not sh.empty and "ForeignInvestmentSharesRatio" in sh.columns:
+        sh_s = sh.sort_values("date", ascending=False)
+        if len(sh_s) >= 5:
+            latest = float(sh_s.iloc[0]["ForeignInvestmentSharesRatio"])
+            past = float(sh_s.iloc[4]["ForeignInvestmentSharesRatio"])
+            out["sh_change"] = round(latest - past, 2)
+    return out
+
+
+def _event_radar_tw_md(entry, trend):
+    if not entry and not any(v is not None for v in trend.values()):
+        return ""
+    lines = ["\n## 🚨 事件雷達 (短期籌碼)\n",
+             "| 訊號 | 值 | 判讀 |", "|---|---:|---|"]
+    if entry:
+        lines.append(f"| **3:1 判讀** | 距 Max Entry {entry['dist_pct']:+.1f}% | **{entry['verdict']}** |")
+    if trend["f5"] is not None:
+        lines.append(f"| 外資 5d 淨 | {trend['f5']/1000:+,.0f} 張 | {'🟢 買' if trend['f5']>0 else '🔴 賣'} |")
+    if trend["f20"] is not None:
+        lines.append(f"| 外資 20d 淨 | {trend['f20']/1000:+,.0f} 張 | {'🟢 買' if trend['f20']>0 else '🔴 賣'} |")
+    if trend["flip"]:
+        lines.append(f"| 5d ↔ 20d | {trend['flip']} | ⚠️ |")
+    if trend["sh_change"] is not None:
+        emoji = '🟢' if trend['sh_change'] > 0.1 else '🔴' if trend['sh_change'] < -0.1 else '⚪'
+        lines.append(f"| 外資持股 5d 變化 | {trend['sh_change']:+.2f} pp | {emoji} |")
+    return "\n".join(lines) + "\n"
+
+
+def _summary_action_tw(entry, trend):
+    if not entry:
+        return ""
+    md = f"""
+---
+
+## 🎯 綜合判讀 / 事件行動
+
+### 進場策略 (3:1 派)
+- **限價買**: {entry['max_entry']}
+- **止損**: {entry['sl']} (跌破止損, 重新評估)
+- **目標**: {entry['tp']}
+- **當前判讀**: {entry['verdict']}
+"""
+    warnings = []
+    if trend["flip"]:
+        warnings.append(trend["flip"])
+    if trend["sh_change"] is not None and abs(trend["sh_change"]) > 0.5:
+        warnings.append(f"外資持股 5d 變化 {trend['sh_change']:+.2f} pp (幅度顯著)")
+    if warnings:
+        md += "\n### 🚨 短期警訊\n" + "\n".join(f"- {w}" for w in warnings) + "\n"
+    md += """
+### 撤退訊號 (任一觸發即檢討)
+1. 月營收 YoY 連 2 月轉負
+2. EPS 連 2 季 QoQ 下滑
+3. 外資持股 % 跌破近 3M 低點
+4. 股價跌破 SL
+
+⚠️ 3:1 SL/TP 用 52w 高低粗略估算 (成長股會失真, 高波動股會太寬鬆), 實戰請自行核對技術支撐 + 基本面目標
+"""
+    return md
+
+
+def _entry_section_tw(price, yr_low, yr_high, num):
+    """3:1 盈虧比入場計算段落 (April1Stock 公式)"""
+    e = _calc_entry_tw(price, yr_low, yr_high)
+    if not e:
+        return ""
+    ratio_s = num(e["ratio"]) if e["ratio"] is not None else "—"
     return f"""
 ## 🎯 3:1 入場計算 (April1Stock 公式)
 
@@ -396,11 +499,11 @@ Max Entry = (TP + 3×SL) / 4 → 現價 ≤ Max Entry 才符合 3:1 盈虧比
 
 | 項目 | 值 | 說明 |
 |---|---:|---|
-| **判讀** | **{verdict}** | |
-| SL 止損 | {num(sl)} | 52w 低 × 1.03 |
-| TP 目標 | {num(tp)} | 52w 高 × 1.05 (較粗糙) |
-| **Max Entry** | **{num(max_entry)}** | 現價 ≤ 此值才買 |
-| 現價 | {num(price)} | 距 Max Entry {'+' if dist_pct > 0 else ''}{dist_pct}% |
+| **判讀** | **{e['verdict']}** | |
+| SL 止損 | {num(e['sl'])} | 52w 低 × 1.03 |
+| TP 目標 | {num(e['tp'])} | 52w 高 × 1.05 (較粗糙) |
+| **Max Entry** | **{num(e['max_entry'])}** | 現價 ≤ 此值才買 |
+| 現價 | {num(price)} | 距 Max Entry {'+' if e['dist_pct'] > 0 else ''}{e['dist_pct']}% |
 | 實際盈虧比 | {ratio_s} | 目標 ≥ 3.0 |
 
 ⚠️ 台股 TP 用 52w 高估算, 較樂觀; 實戰請自行核對基本面目標
@@ -495,6 +598,7 @@ def build_md(sid, name, data, dst):
 | 52w 高 | {num(year_high)} | 52w 低 | {num(year_low)} |
 | **PER** | **{num(latest_per)}** | PBR | {num(latest_pbr)} |
 | 殖利率 | {num(div_y)}% | — | — |
+{_event_radar_tw_md(_calc_entry_tw(latest_price, year_low, year_high), _foreign_trend_tw(iw, sh))}
 {_entry_section_tw(latest_price, year_low, year_high, num)}
 
 ## 📈 營收動能
@@ -554,6 +658,9 @@ def build_md(sid, name, data, dst):
             title = str(r.get("title",""))[:80]; date = str(r.get("date",""))[:10]
             link = r.get("link","")
             md += f"- [{title}]({link}) — *{date}*\n"
+
+    md += _summary_action_tw(_calc_entry_tw(latest_price, year_low, year_high),
+                              _foreign_trend_tw(iw, sh))
 
     md += f"\n\n---\n\n_資料源: FinMind • 生成 {datetime.now().strftime('%Y-%m-%d %H:%M')}_\n"
 

@@ -132,13 +132,18 @@ def build_xlsx(sid, name, data, dst):
     if not mv.empty and "market_value" in mv.columns:
         latest_mv = mv.sort_values("date").iloc[-1]["market_value"]
 
-    # 月營收 YoY
+    # 月營收 YoY (FinMind 常沒回 growth 欄, 自己算)
     mrev = data.get("month_rev", pd.DataFrame())
     rev_yoy = latest_month_rev = None
-    if not mrev.empty:
-        mrev_s = mrev.sort_values("date")
+    if not mrev.empty and "revenue" in mrev.columns:
+        mrev_s = mrev.sort_values("date").reset_index(drop=True)
         latest_month_rev = mrev_s.iloc[-1].get("revenue")
-        if "revenue_year_growth" in mrev.columns:
+        if len(mrev_s) >= 13:
+            cur = float(mrev_s.iloc[-1]["revenue"] or 0)
+            prev = float(mrev_s.iloc[-13]["revenue"] or 0)
+            if prev > 0:
+                rev_yoy = round((cur / prev - 1) * 100, 1)
+        if rev_yoy is None and "revenue_year_growth" in mrev.columns:
             rev_yoy = mrev_s.iloc[-1].get("revenue_year_growth")
 
     # 三大法人 90d
@@ -233,14 +238,14 @@ def build_xlsx(sid, name, data, dst):
 
     # === 月營收 10Y ===
     if not mrev.empty and "revenue" in mrev.columns:
-        m = mrev.copy()
+        m = mrev.sort_values("date").copy().reset_index(drop=True)
         m["營收(億)"] = (m["revenue"] / 1e8).round(2)
-        keep_cols = ["date","營收(億)"]
-        if "revenue_year_growth" in m.columns:
-            m["YoY%"] = m["revenue_year_growth"]; keep_cols.append("YoY%")
-        if "revenue_month_growth" in m.columns:
-            m["MoM%"] = m["revenue_month_growth"]; keep_cols.append("MoM%")
-        sheets["月營收10Y"] = m[keep_cols].sort_values("date", ascending=False)
+        # 手算 YoY (前 12 月同月比較) + MoM
+        m["YoY%"] = (m["revenue"] / m["revenue"].shift(12) - 1) * 100
+        m["YoY%"] = m["YoY%"].round(1)
+        m["MoM%"] = (m["revenue"] / m["revenue"].shift(1) - 1) * 100
+        m["MoM%"] = m["MoM%"].round(1)
+        sheets["月營收10Y"] = m[["date","營收(億)","YoY%","MoM%"]].sort_values("date", ascending=False)
 
     # === 損益季 10Y (pivot) ===
     inc = _inc
@@ -711,10 +716,13 @@ def build_md(sid, name, data, dst):
 
     if not div.empty:
         md += "\n## 💵 股利歷史 (近 5 年)\n\n| 年 | 現金 | 股票 |\n|---|---:|---:|"
-        for _, r in div.sort_values("date", ascending=False).head(5).iterrows():
-            cash = r.get("CashEarningsDistribution", 0) or 0
-            stk = r.get("StockEarningsDistribution", 0) or 0
-            md += f"\n| {(r.get('date') or '')[:4]} | {cash:.2f} | {stk:.2f} |"
+        d = div.copy()
+        d["_year"] = d.get("date", "").astype(str).str[:4]
+        d["_cash"] = pd.to_numeric(d.get("CashEarningsDistribution"), errors="coerce").fillna(0)
+        d["_stk"] = pd.to_numeric(d.get("StockEarningsDistribution"), errors="coerce").fillna(0)
+        by_year = d.groupby("_year").agg(cash=("_cash", "sum"), stk=("_stk", "sum"))
+        for y, r in by_year.sort_index(ascending=False).head(5).iterrows():
+            md += f"\n| {y} | {r['cash']:.2f} | {r['stk']:.2f} |"
 
     if not news.empty:
         md += "\n\n## 📰 最新新聞\n\n"

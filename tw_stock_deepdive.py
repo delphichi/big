@@ -180,9 +180,10 @@ def build_xlsx(sid, name, data, dst):
     entry = _calc_entry_tw(latest_price, year_low, year_high)
     trend = _foreign_trend_tw(iw, sh)
 
-    # PER 換算 (供概覽用)
+    # PER 換算 + 混合版 3:1 (供概覽用)
     _inc = data.get("income", pd.DataFrame())
     per_md, per_df = _per_band_tw(latest_price, _inc)
+    hybrid = _calc_entry_tw_hybrid(latest_price, year_high, price_1y, _inc)
     per_summary = None
     if per_df is not None and not per_df.empty:
         eps_4q_rows = _inc[_inc["type"] == "EPS"].sort_values("date", ascending=False).head(4)
@@ -216,6 +217,16 @@ def build_xlsx(sid, name, data, dst):
         ("現價對應 PER", per_summary["cur_pe"] if per_summary else None),
         ("保守 18x 合理價", per_summary["conservative_18x"] if per_summary else None),
         ("中間 22x 合理價", per_summary["fair_22x"] if per_summary else None),
+        ("─── 3:1 混合版 (推薦) ───", ""),
+        ("混合 SL 技術 (近 3M 低×1.03)", hybrid["sl_tech"] if hybrid else None),
+        ("混合 SL 基本面 (EPS×15x)", hybrid["sl_fund"] if hybrid else None),
+        ("混合 SL 採用", f"{hybrid['sl']} ({hybrid['sl_source']})" if hybrid else None),
+        ("混合 TP 技術 (52w 高×1.05)", hybrid["tp_tech"] if hybrid else None),
+        ("混合 TP 基本面 (EPS×26x)", hybrid["tp_fund"] if hybrid else None),
+        ("混合 TP 採用", f"{hybrid['tp']} ({hybrid['tp_source']})" if hybrid else None),
+        ("混合 Max Entry", hybrid["max_entry"] if hybrid else None),
+        ("混合 距 Max Entry %", hybrid["dist_pct"] if hybrid else None),
+        ("混合 判讀", hybrid["verdict"] if hybrid else None),
         ("─── 事件雷達 ───", ""),
         ("外資 5d 淨(千股)", round(trend["f5"]/1000, 0) if trend["f5"] is not None else None),
         ("外資 20d 淨(千股)", round(trend["f20"]/1000, 0) if trend["f20"] is not None else None),
@@ -512,6 +523,103 @@ def _summary_action_tw(entry, trend):
     return md
 
 
+def _calc_entry_tw_hybrid(price, yr_high, price_1y, inc,
+                          pe_floor=15, pe_cap=26, months_recent=3):
+    """3:1 混合版: 加基本面上下限
+    SL = max(近 3M 低點×1.03, EPS × pe_floor)  ← 兩者取較高當作下限
+    TP = min(52w 高×1.05,       EPS × pe_cap)   ← 兩者取較低當作上限
+    """
+    if not price or not yr_high or inc.empty or price_1y.empty:
+        return None
+    if "type" not in inc.columns or "close" not in price_1y.columns:
+        return None
+
+    eps_rows = inc[inc["type"] == "EPS"].sort_values("date", ascending=False).head(4)
+    if len(eps_rows) < 4:
+        return None
+    eps_4q = float(eps_rows["value"].sum())
+    if eps_4q <= 0:
+        return None
+
+    # 近 N 個月低點
+    p = price_1y.sort_values("date").copy()
+    p["_d"] = pd.to_datetime(p["date"], errors="coerce")
+    latest_d = p["_d"].iloc[-1]
+    cutoff = latest_d - pd.Timedelta(days=months_recent * 30)
+    recent = p[p["_d"] >= cutoff]
+    if recent.empty:
+        return None
+    low_recent = float(recent["min"].min()) if "min" in recent.columns else float(recent["close"].min())
+
+    sl_tech = round(low_recent * 1.03, 2)
+    sl_fund = round(eps_4q * pe_floor, 2)
+    sl = max(sl_tech, sl_fund)
+
+    tp_tech = round(yr_high * 1.05, 2)
+    tp_fund = round(eps_4q * pe_cap, 2)
+    tp = min(tp_tech, tp_fund)
+
+    result = {"eps_4q": round(eps_4q, 2),
+              "sl_tech": sl_tech, "sl_fund": sl_fund, "sl": sl,
+              "sl_source": "技術" if sl_tech >= sl_fund else "基本面",
+              "tp_tech": tp_tech, "tp_fund": tp_fund, "tp": tp,
+              "tp_source": "技術" if tp_tech <= tp_fund else "基本面"}
+
+    if tp <= sl:
+        result["verdict"] = f"⚠️ 混合失效 (TP 上限 {tp} ≤ SL 下限 {sl})"
+        result["failure"] = "基本面天花板已跌破技術支撐 → 估值極端偏貴, 不建議進場"
+        result["max_entry"] = None
+        result["dist_pct"] = None
+        result["ratio"] = None
+        return result
+
+    max_entry = round((tp + 3 * sl) / 4, 2)
+    if price <= sl: verdict = "🚨 已破止損"
+    elif price <= max_entry: verdict = "🟢 進場區(≥3:1)"
+    elif price <= max_entry * 1.05: verdict = "🟡 接近門檻(<5%)"
+    elif price <= max_entry * 1.15: verdict = "🟠 稍高(5-15%)"
+    else: verdict = "🔴 追高風險(>15%)"
+
+    result.update({
+        "max_entry": max_entry,
+        "verdict": verdict,
+        "dist_pct": round((price / max_entry - 1) * 100, 1),
+        "ratio": round((tp - price) / (price - sl), 2) if price > sl else None,
+    })
+    return result
+
+
+def _entry_hybrid_tw_md(price, yr_high, price_1y, inc, num):
+    """3:1 混合版 md 段落"""
+    h = _calc_entry_tw_hybrid(price, yr_high, price_1y, inc)
+    if not h:
+        return ""
+    md = f"""
+## 🎯 3:1 混合版 (技術 + 基本面下限/上限)
+
+推薦!純技術 3:1 對成長股會太寬鬆, 純 PER 對動能股會太早進. 混合版取兩者更嚴格的邊界:
+- **SL 下限** = max(近 3M 低點×1.03, EPS × 15x)  ← 兩個支撐取高
+- **TP 上限** = min(52w 高×1.05, EPS × 26x)      ← 兩個目標取低
+
+| 項目 | 技術值 | 基本面值 | **採用** | 說明 |
+|---|---:|---:|---:|---|
+| SL 止損 | {num(h['sl_tech'])} | {num(h['sl_fund'])} | **{num(h['sl'])}** ({h['sl_source']}) | 近 3M 低×1.03 vs EPS×15x |
+| TP 目標 | {num(h['tp_tech'])} | {num(h['tp_fund'])} | **{num(h['tp'])}** ({h['tp_source']}) | 52w 高×1.05 vs EPS×26x |
+"""
+    if h.get("failure"):
+        md += f"\n**判讀**: **{h['verdict']}**\n\n{h['failure']}\n"
+    else:
+        ratio_s = num(h["ratio"]) if h["ratio"] is not None else "—"
+        sign = '+' if h["dist_pct"] > 0 else ''
+        md += f"""| **Max Entry** | | | **{num(h['max_entry'])}** | (TP + 3×SL) / 4 |
+| 現價 | | | {num(price)} | 距 Max Entry {sign}{h['dist_pct']}% |
+| 實際盈虧比 | | | {ratio_s} | 目標 ≥ 3.0 |
+
+**判讀**: **{h['verdict']}**  (基於近 4Q EPS {h['eps_4q']})
+"""
+    return md
+
+
 def _per_band_tw(price, inc):
     """PER × 近 4Q EPS 換算價. 返回 (md_str, df) 或 (None, None)"""
     if inc.empty or "type" not in inc.columns:
@@ -669,6 +777,7 @@ def build_md(sid, name, data, dst):
 {_event_radar_tw_md(_calc_entry_tw(latest_price, year_low, year_high), _foreign_trend_tw(iw, sh))}
 {_entry_section_tw(latest_price, year_low, year_high, num)}
 {_per_band_tw(latest_price, data.get('income', pd.DataFrame()))[0] or ''}
+{_entry_hybrid_tw_md(latest_price, year_high, price_1y, data.get('income', pd.DataFrame()), num)}
 
 ## 📈 營收動能
 

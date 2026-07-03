@@ -180,9 +180,11 @@ def build_xlsx(sid, name, data, dst):
     entry = _calc_entry_tw(latest_price, year_low, year_high)
     trend = _foreign_trend_tw(iw, sh)
 
-    # 週期股識別
+    # 週期股 / 爆發性成長股 識別
     cagr_5y = _cagr_5y_tw(mrev)
-    cyc = _detect_cyclical_tw(year_high, year_low, cagr_5y, rev_yoy)
+    _div_for_trend = data.get("dividend", pd.DataFrame())
+    div_trend = _dividend_trend_tw(_div_for_trend)
+    cyc = _detect_cyclical_tw(year_high, year_low, cagr_5y, rev_yoy, div_trend)
     _mid_eps = None
     _mid_pe = None
     _inc_tmp = data.get("income", pd.DataFrame())
@@ -558,31 +560,69 @@ def _cagr_5y_tw(mrev):
     return None
 
 
-def _detect_cyclical_tw(yr_high, yr_low, cagr_5y, latest_yoy):
-    """檢測週期股. 返回 dict 或 None
-    條件 (任一觸發):
-    - 52w 高低比 > 3 (振幅極大)
-    - 5y CAGR ≤ 5% AND 月營收 YoY > 100% (谷底→復甦)
+def _dividend_trend_tw(div, years=3):
+    """判斷近 N 年股利趨勢. 返回 'up'/'down'/'volatile'/None"""
+    if div.empty or "CashEarningsDistribution" not in div.columns:
+        return None
+    d = div.copy()
+    d["_year"] = d.get("date", "").astype(str).str[:4]
+    d["_cash"] = pd.to_numeric(d.get("CashEarningsDistribution"), errors="coerce").fillna(0)
+    by_year = d.groupby("_year")["_cash"].sum().sort_index()
+    if len(by_year) < years:
+        return None
+    recent = by_year.tail(years).tolist()
+    if all(recent[i] < recent[i+1] for i in range(len(recent)-1)):
+        return "up"
+    if all(recent[i] > recent[i+1] for i in range(len(recent)-1)):
+        return "down"
+    return "volatile"
+
+
+def _detect_cyclical_tw(yr_high, yr_low, cagr_5y, latest_yoy, div_trend=None):
+    """檢測週期股 / 爆發性成長股. 返回 dict 或 None
+
+    分類:
+    - 52w 高低比 > 3 OR (CAGR ≤ 5% AND YoY > 100%) → 進入分類
+    - 若 5y CAGR > 20% AND YoY > 50% AND 股利單調成長 → 🚀 爆發性成長股 (非週期)
+    - 否則若高低比 > 5 → 🌊🌊 強週期股
+    - 否則 → 🌊 週期股
     """
     if not (yr_high and yr_low and yr_low > 0):
         return None
     ratio = yr_high / yr_low
-    reasons = []
-    if ratio > 3:
-        reasons.append(f"52w 高低比 **{ratio:.1f}x** (> 3, 極端波動)")
-    if (cagr_5y is not None and cagr_5y <= 5
-        and latest_yoy is not None and latest_yoy > 100):
-        reasons.append(f"5y CAGR **{cagr_5y}%** + 月營收 YoY **{latest_yoy}%** (谷底復甦)")
-    if not reasons:
+    trig_ratio = ratio > 3
+    trig_recovery = (cagr_5y is not None and cagr_5y <= 5
+                     and latest_yoy is not None and latest_yoy > 100)
+    if not (trig_ratio or trig_recovery):
         return None
+
+    reasons = []
+    if trig_ratio: reasons.append(f"52w 高低比 **{ratio:.1f}x** (> 3, 極端波動)")
+    if trig_recovery: reasons.append(f"5y CAGR **{cagr_5y}%** + 月營收 YoY **{latest_yoy}%** (谷底復甦)")
+
+    is_explosive = (cagr_5y is not None and cagr_5y > 20
+                    and latest_yoy is not None and latest_yoy > 50
+                    and div_trend == "up")
+
+    if is_explosive:
+        return {"type": "explosive", "severity": "🚀 爆發性成長股",
+                "ratio": round(ratio, 1), "reasons": reasons,
+                "note": f"52w 高低比 {ratio:.1f}x 看似週期, 但 5y CAGR {cagr_5y}% + 股利連年成長 → 一次性 shift 到新平台, 而非反覆循環"}
+
     severity = "🌊🌊 強週期股" if ratio > 5 else "🌊 週期股"
-    return {"severity": severity, "ratio": round(ratio, 1), "reasons": reasons}
+    return {"type": "cyclical", "severity": severity,
+            "ratio": round(ratio, 1), "reasons": reasons}
 
 
 def _cyclical_warning_tw_md(cyc, price, inc, num):
-    """週期股警告段 + mid-cycle EPS 估算"""
+    """週期股 / 爆發性成長股 警告段"""
     if not cyc:
         return ""
+
+    if cyc.get("type") == "explosive":
+        return _explosive_growth_md(cyc, price, inc, num)
+
+    # 週期股: mid-cycle EPS 估算
     mid_cycle_eps = cur_pe_mid = t15 = t20 = None
     if not inc.empty and "type" in inc.columns:
         eps_rows = inc[inc["type"] == "EPS"].sort_values("date", ascending=False).head(8)
@@ -620,6 +660,54 @@ def _cyclical_warning_tw_md(cyc, price, inc, num):
 1. **PBR** vs 5 年中位 (週期股 PBR 通常震盪明確)
 2. **同業股價**(週期領先者已先反映)
 3. **產業景氣領先指標** (DRAM 現貨價 / BDI 波羅的海指數 / 面板價 等)
+"""
+    return md
+
+
+def _explosive_growth_md(cyc, price, inc, num):
+    """爆發性成長股 提醒段"""
+    eps_4q_now = eps_4q_prev = growth_yoy = None
+    if not inc.empty and "type" in inc.columns:
+        eps = inc[inc["type"] == "EPS"].sort_values("date", ascending=False)
+        if len(eps) >= 8:
+            eps_4q_now = round(float(eps.head(4)["value"].sum()), 2)
+            eps_4q_prev = round(float(eps.iloc[4:8]["value"].sum()), 2)
+            if eps_4q_prev > 0:
+                growth_yoy = round((eps_4q_now / eps_4q_prev - 1) * 100, 1)
+
+    md = f"\n## {cyc['severity']} 提醒 — 不是週期股\n\n**觸發條件 (看似週期)**:\n"
+    for r in cyc["reasons"]:
+        md += f"- {r}\n"
+    md += f"\n**但實際是爆發性成長**:\n{cyc['note']}\n"
+    md += """
+**估值該怎麼看**:
+- ❌ 不要用 mid-cycle EPS (EPS 可能繼續往上, 沒有 mid-cycle 的概念)
+- ✅ **上方 PER 換算表可用** — 但需搭配「未來 EPS 是否續增」判斷
+- ✅ 建議看 **PEG** (PER / 成長率), 成長率若 > PER 通常合理
+"""
+    if eps_4q_now and growth_yoy is not None:
+        cur_pe = round(price / eps_4q_now, 1) if eps_4q_now > 0 and price else None
+        peg = round(cur_pe / growth_yoy, 2) if cur_pe and growth_yoy > 0 else None
+        md += f"""
+**EPS 4Q 動能檢查**:
+
+| 項目 | 值 |
+|---|---:|
+| 近 4Q EPS | {num(eps_4q_now)} |
+| 前 4Q EPS | {num(eps_4q_prev)} |
+| **EPS 4Q YoY** | **{num(growth_yoy)}%** |
+| 現價對應 PER | {num(cur_pe)}x |
+| **PEG (PER/成長率)** | **{num(peg) if peg else '—'}** |
+
+判讀: {'🟢 PEG < 1, 成長率 > PER, 合理' if peg and peg < 1 else '🟡 PEG 1-1.5, 尚可' if peg and peg < 1.5 else '🟠 PEG 1.5-2, 偏貴' if peg and peg < 2 else '🔴 PEG > 2, 貴 (或成長已放緩)' if peg else '需 EPS 資料'}
+"""
+    md += """
+**該監控什麼 (爆發性成長股專屬)**:
+1. **月營收 YoY 是否持續 > 30%** (成長是否放緩)
+2. **EPS QoQ 是否連續加速** (基本面實現的節奏)
+3. **同業比較** (龍頭是否也在漲, 是類股 shift 還是個別)
+4. **產業事件** (下游客戶 CapEx / 訂單 / 政策)
+5. ⚠️ **一旦月營收 YoY 掉到 10% 以下 → 蜜月期結束訊號**
 """
     return md
 
@@ -881,7 +969,7 @@ def build_md(sid, name, data, dst):
 | 52w 高 | {num(year_high)} | 52w 低 | {num(year_low)} |
 | **PER** | **{num(latest_per)}** | PBR | {num(latest_pbr)} |
 | 殖利率 | {num(div_y)}% | — | — |
-{_cyclical_warning_tw_md(_detect_cyclical_tw(year_high, year_low, _cagr_5y_tw(mrev), rev_yoy), latest_price, data.get('income', pd.DataFrame()), num)}
+{_cyclical_warning_tw_md(_detect_cyclical_tw(year_high, year_low, _cagr_5y_tw(mrev), rev_yoy, _dividend_trend_tw(div)), latest_price, data.get('income', pd.DataFrame()), num)}
 {_event_radar_tw_md(_calc_entry_tw(latest_price, year_low, year_high), _foreign_trend_tw(iw, sh))}
 {_entry_section_tw(latest_price, year_low, year_high, num)}
 {_per_band_tw(latest_price, data.get('income', pd.DataFrame()))[0] or ''}

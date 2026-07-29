@@ -7,10 +7,10 @@ on:
         description: "自訂監看清單 (逗號分隔,空白則用預設 96 檔)"
         required: false
         default: ""
-  schedule:
+ # schedule:
     # 每週二~六 美股盤後 07:00 UTC (= 台北 15:00 / 美東 03:00,前一日美股已收盤)
     # 美股週一收 → 台北週二 15:00 跑;週五收 → 台北週六 15:00 跑
-    - cron: "0 7 * * 2,3,4,5,6"
+   # - cron: "0 7 * * 2,3,4,5,6"
 
 permissions:
   contents: write

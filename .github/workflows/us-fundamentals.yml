@@ -11,9 +11,9 @@ on:
         description: '本輪上限 (付費FMP一把梭設大;免費版設45)'
         required: false
         default: '4000'
-  schedule:
+  #schedule:
     # 每天 10:00 UTC — 增量續抓(付費FMP 300/分;全市場分數輪跑完, 之後維持更新)
-    - cron: "0 10 * * *"
+    #- cron: "0 10 * * *"
 
 permissions:
   contents: write

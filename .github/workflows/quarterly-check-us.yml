@@ -2,9 +2,9 @@ name: 美股持倉季度追蹤
 
 on:
   workflow_dispatch:
-  schedule:
+  #schedule:
     # 每週一 13:00 UTC (避開週末,美股財報週通常 Mon-Thu)
-    - cron: "0 13 * * 1"
+    #- cron: "0 13 * * 1"
 
 permissions:
   contents: write

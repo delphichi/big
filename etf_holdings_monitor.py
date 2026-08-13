@@ -84,34 +84,32 @@ def fetch(fund, d, retries=3):
     return None
 
 
-def parse(content, code=None):
-    """兩家格式通用:掃描含『代號』的表頭列,標準化為 代號/名稱/股數/權重。
-    失敗時 print 明確原因 (含 code 供 debug)。
-    """
-    tag = f"[{code}]" if code else ""
-    try:
-        raw = pd.read_excel(io.BytesIO(content), header=None)
-    except Exception as e:
-        print(f"  {tag} parse: Excel 讀不了 ({str(e)[:60]})")
-        return None
+def _parse_one_sheet(content, sheet_name, code, tag):
+    """單一 sheet parse 邏輯. 失敗回 None (不 print, 由外層決定)."""
+    raw = pd.read_excel(io.BytesIO(content), header=None, sheet_name=sheet_name)
     hdr = None
     for i in range(min(30, len(raw))):
         if raw.iloc[i].astype(str).str.contains("代號").any():
             hdr = i; break
     if hdr is None:
-        print(f"  {tag} parse: 找不到「代號」表頭 (前 3 列: {raw.head(3).values.tolist()})")
-        return None
-    df = pd.read_excel(io.BytesIO(content), header=hdr)
+        return None, "找不到「代號」表頭"
+    df = pd.read_excel(io.BytesIO(content), header=hdr, sheet_name=sheet_name)
 
-    def col(keys):
+    def col(keys, exclude=None):
         for c in df.columns:
-            if any(k in str(c) for k in keys):
+            cs = str(c)
+            if exclude and any(x in cs for x in exclude):
+                continue
+            if any(k in cs for k in keys):
                 return c
         return None
-    ci, cn, cs, cw = col(["代號"]), col(["名稱"]), col(["股數"]), col(["權重", "比重"])
+    # 排除「期貨代號」以避免抓到期貨 sheet
+    ci = col(["代號"], exclude=["期貨"])
+    cs = col(["股數"], exclude=["口數"])
+    cn = col(["名稱"], exclude=["期貨"])
+    cw = col(["權重", "比重"])
     if not (ci and cs):
-        print(f"  {tag} parse: 缺欄位 代號={ci} 股數={cs} (欄位: {list(df.columns)})")
-        return None
+        return None, f"缺欄位 代號={ci} 股數={cs} (欄位: {list(df.columns)})"
     out = pd.DataFrame({
         "代號": df[ci].astype(str).str.replace(r"\.0$", "", regex=True).str.strip(),
         "名稱": df[cn].astype(str).str.strip() if cn else "",
@@ -121,9 +119,31 @@ def parse(content, code=None):
     before = len(out)
     out = out[out["代號"].str.match(r"^\d{4}$")].dropna(subset=["股數"])
     if out.empty:
-        print(f"  {tag} parse: filter 後空表 (原 {before} rows, 代號可能非 4 位數)")
+        return None, f"filter 後空 (原 {before} rows)"
+    return out.set_index("代號"), None
+
+
+def parse(content, code=None):
+    """兩家格式通用. 支援多 sheet: 逐個 sheet 試, 找到含 4 位數代號的 sheet 為止."""
+    tag = f"[{code}]" if code else ""
+    try:
+        xl = pd.ExcelFile(io.BytesIO(content))
+    except Exception as e:
+        print(f"  {tag} parse: Excel 讀不了 ({str(e)[:60]})")
         return None
-    return out.set_index("代號")
+    errors = []
+    for sn in xl.sheet_names:
+        try:
+            df, err = _parse_one_sheet(content, sn, code, tag)
+            if df is not None:
+                if len(xl.sheet_names) > 1:
+                    print(f"  {tag} parse: 使用 sheet「{sn}」({len(df)} 檔)")
+                return df
+            errors.append(f"sheet「{sn}」→ {err}")
+        except Exception as e:
+            errors.append(f"sheet「{sn}」→ 例外 {str(e)[:50]}")
+    print(f"  {tag} parse 失敗 (試了 {len(xl.sheet_names)} 個 sheet): {'; '.join(errors)}")
+    return None
 
 
 def snapshot_path(code, d):

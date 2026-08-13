@@ -35,8 +35,9 @@ FUNDS = [
     {"code": "00998A", "name": "復華金融股息", "house": "fhtrust", "etf": "ETF24"},
     {"code": "00981A", "name": "統一台股增長", "house": "ezmoney", "fc": "49YTW"},
     {"code": "00403A", "name": "統一升級50",   "house": "ezmoney", "fc": "63YTW"},
-    # ⚠️ TODO: 確認 code 對應的正式 ETF 代號; token 若過期需從網頁 F12 重刷
-    {"code": "00682450", "name": "中信 (待確認)", "house": "direct",
+    # ⚠️ token 若過期 → 打開 https://www.ctbcinvestments.com.tw/Etf/00406A/Combination
+    # F12 Network 找 DownloadETFHoldingWeight 抓新 URL 更新
+    {"code": "00406A", "name": "中信主動式ETF", "house": "direct",
      "url": "https://www.ctbcinvestments.com.tw/API/etf/DownloadETFHoldingWeight?token=bwWJTtJZjUg2CtlP%2FI%2BOPSEucozq0mi7b0iB1O6GpbLR9vuI5ZQqPCNcpXYgoQYLMTY0MzkyMTkyNjUyNjY4OA%3D%3D024"},
 ]
 

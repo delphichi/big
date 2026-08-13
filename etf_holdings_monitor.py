@@ -55,7 +55,10 @@ def fetch(fund, d):
             r = s.get(url, timeout=30)
         elif fund["house"] == "direct":
             # token 已在 URL 內, 無日期參數 → server 回最新持股
+            # 有些 endpoint 只接受 POST (如中信 CTBC), GET 失敗自動 fallback POST
             r = s.get(fund["url"], timeout=30)
+            if r.status_code == 405:
+                r = s.post(fund["url"], timeout=30)
         else:
             url = "https://www.ezmoney.com.tw/ETF/Transaction/PCFExcelNPOI"
             r = s.get(url, params={"fundCode": fund["fc"], "date": roc(d), "specificDate": "true"}, timeout=30)
@@ -281,12 +284,16 @@ def _write_email_diff(today):
     consensus_sell = {s: v for s, v in sell.items() if len(set(v["funds"])) >= 2}
     divergent = {s: (buy[s], sell[s]) for s in set(buy) & set(sell)}
 
-    # 判斷是否值得寄信: 有共識 OR 有任一新進/剔除
+    # 判斷是否值得寄信: 有共識/新進/剔除/建倉/大幅變動 (>= 50%)
     total_new = sum(len(f["new"]) for f in per_fund)
     total_drop = sum(len(f["drop"]) for f in per_fund)
-    worth_send = bool(consensus_buy or consensus_sell or divergent or total_new or total_drop)
+    total_build = sum(1 for f in per_fund for c in f["chg"] if c[4])  # build flag
+    total_big = sum(1 for f in per_fund for c in f["chg"]
+                    if c[2] is not None and abs(c[2]) >= 50)
+    worth_send = bool(consensus_buy or consensus_sell or divergent
+                      or total_new or total_drop or total_build or total_big)
     if not worth_send:
-        print("⚠️ 今日僅小幅權重變化, 無結構性訊號, 不產 email")
+        print("⚠️ 今日僅小幅權重變化 (< 50%), 無結構性訊號, 不產 email")
         return
 
     parts = []
@@ -294,7 +301,9 @@ def _write_email_diff(today):
     if consensus_sell: parts.append(f"{len(consensus_sell)} 共識減碼")
     if total_new: parts.append(f"{total_new} 新進")
     if total_drop: parts.append(f"{total_drop} 剔除")
-    subject = f"📊 主動 ETF 持股 diff — {' + '.join(parts) or '結構變化'} ({today:%m/%d})"
+    if total_build: parts.append(f"{total_build} 建倉")
+    if total_big: parts.append(f"{total_big} 大幅動")
+    subject = f"📊 主動 ETF 持股 diff — {' + '.join(parts)} ({today:%m/%d})"
     with open("/tmp/etf_diff_subject.txt", "w", encoding="utf-8") as f:
         f.write(subject)
 

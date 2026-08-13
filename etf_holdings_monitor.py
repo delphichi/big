@@ -167,10 +167,18 @@ def fetch_capfutures():
     回傳 {code: {stockCode: {"name": ..., "weight": float, "shares": int}}} 或 None.
     失敗不影響主流程 → 只回 None + print 警告.
     """
+    # 完整 browser-like headers, 只帶最少會被 WAF 擋 (實測 CI 環境需要 Referer/Origin/Accept-Language)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        "Referer": "https://etf.capfutures.com/?view=holdings",
+        "Origin": "https://etf.capfutures.com",
+    }
     try:
-        r = requests.get(CAPFUTURES_URL, headers={"User-Agent": UA, "Accept": "application/json"}, timeout=20)
+        r = requests.get(CAPFUTURES_URL, headers=headers, timeout=20)
         if r.status_code != 200:
-            print(f"⚠️ capfutures 抓失敗 HTTP {r.status_code}")
+            print(f"⚠️ capfutures 抓失敗 HTTP {r.status_code} (body: {r.text[:150]})")
             return None
         j = r.json()
         funds = j.get("funds", {})

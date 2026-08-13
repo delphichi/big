@@ -37,8 +37,9 @@ FUNDS = [
     {"code": "00403A", "name": "統一升級50",   "house": "ezmoney", "fc": "63YTW"},
     # ⚠️ token 若過期 → 打開 https://www.ctbcinvestments.com.tw/Etf/00406A/Combination
     # F12 Network 找 DownloadETFHoldingWeight 抓新 URL 更新
+    # 尾綴 024 移除, base64 token 應以 == 結尾
     {"code": "00406A", "name": "中信主動式ETF", "house": "direct",
-     "url": "https://www.ctbcinvestments.com.tw/API/etf/DownloadETFHoldingWeight?token=bwWJTtJZjUg2CtlP%2FI%2BOPSEucozq0mi7b0iB1O6GpbLR9vuI5ZQqPCNcpXYgoQYLMTY0MzkyMTkyNjUyNjY4OA%3D%3D024"},
+     "url": "https://www.ctbcinvestments.com.tw/API/etf/DownloadETFHoldingWeight?token=bwWJTtJZjUg2CtlP%2FI%2BOPSEucozq0mi7b0iB1O6GpbLR9vuI5ZQqPCNcpXYgoQYLMTY0MzkyMTkyNjUyNjY4OA%3D%3D"},
 ]
 
 
@@ -46,29 +47,40 @@ def roc(d):
     return f"{d.year - 1911}/{d.month:02d}/{d.day:02d}"
 
 
-def fetch(fund, d):
-    """回傳 Excel bytes 或 None。"""
+import time
+
+def fetch(fund, d, retries=3):
+    """回傳 Excel bytes 或 None. 每檔都會 print 結果 (成功/失敗)."""
     s = requests.Session(); s.headers["User-Agent"] = UA
-    try:
-        if fund["house"] == "fhtrust":
-            url = f"https://www.fhtrust.com.tw/api/assetsExcel/{fund['etf']}/{d:%Y%m%d}"
-            r = s.get(url, timeout=30)
-        elif fund["house"] == "direct":
-            # token 已在 URL 內, 無日期參數 → server 回最新持股
-            # 有些 endpoint 只接受 POST (如中信 CTBC), GET 失敗自動 fallback POST
-            r = s.get(fund["url"], timeout=30)
-            if r.status_code == 405:
-                r = s.post(fund["url"], timeout=30)
-        else:
-            url = "https://www.ezmoney.com.tw/ETF/Transaction/PCFExcelNPOI"
-            r = s.get(url, params={"fundCode": fund["fc"], "date": roc(d), "specificDate": "true"}, timeout=30)
-        if r.status_code == 200 and len(r.content) > 500:
-            return r.content
-        # direct 模式 若失敗大概是 token 過期
-        if fund["house"] == "direct":
-            print(f"  {fund['code']} direct URL 失敗 (HTTP {r.status_code}, 可能 token 過期需重刷)")
-    except Exception as e:
-        print(f"  {fund['code']} 抓取失敗:{str(e)[:60]}")
+    last_err = None
+    for attempt in range(retries):
+        try:
+            if fund["house"] == "fhtrust":
+                url = f"https://www.fhtrust.com.tw/api/assetsExcel/{fund['etf']}/{d:%Y%m%d}"
+                r = s.get(url, timeout=30)
+            elif fund["house"] == "direct":
+                # token 在 URL 內, 無日期參數 → server 回最新持股
+                # 有些 endpoint 只接受 POST (中信 CTBC), GET 失敗 fallback POST
+                r = s.get(fund["url"], timeout=30)
+                if r.status_code == 405:
+                    r = s.post(fund["url"], timeout=30)
+            else:
+                url = "https://www.ezmoney.com.tw/ETF/Transaction/PCFExcelNPOI"
+                r = s.get(url, params={"fundCode": fund["fc"], "date": roc(d), "specificDate": "true"}, timeout=30)
+            if r.status_code == 200 and len(r.content) > 500:
+                print(f"  {fund['code']} ✓ 抓到 ({len(r.content)/1024:.1f}KB)")
+                return r.content
+            last_err = f"HTTP {r.status_code}, content {len(r.content)} bytes"
+            if r.status_code == 500 and fund["house"] == "direct":
+                last_err += " (token 可能過期)"
+                break  # 500 不用 retry
+            if 400 <= r.status_code < 500:
+                break  # 4xx 不用 retry
+        except Exception as e:
+            last_err = str(e)[:80]
+        if attempt < retries - 1:
+            time.sleep(2 ** attempt)  # backoff 1s, 2s
+    print(f"  {fund['code']} ✗ 抓取失敗: {last_err}")
     return None
 
 
@@ -270,9 +282,10 @@ def _collect_diff(today):
     return per_fund, buy, sell
 
 
-def _write_email_diff(today):
+def _write_email_diff(today, pull_result=None):
     """產出 /tmp/etf_diff_subject.txt + _body.html
     只有結構性變化 (新進/剔除/共識) 才寫 subject → workflow 判斷是否寄信
+    pull_result: {code: bool} 每檔今日抓取結果 (True=成功, False=失敗)
     """
     per_fund, buy, sell = _collect_diff(today)
     if not per_fund:
@@ -309,8 +322,18 @@ def _write_email_diff(today):
 
     html = f"""<html><body style='font-family:-apple-system,sans-serif;max-width:900px'>
 <h2>📊 主動式 ETF 持股 diff ({today:%Y-%m-%d})</h2>
-<p style='color:#666'>對比昨日, 追蹤 {len(per_fund)} 檔基金經理人動向</p>
+<p style='color:#666'>對比昨日, 監看清單共 {len(FUNDS)} 檔, 今日 {len(per_fund)} 檔有可比 diff</p>
 """
+
+    # 抓取狀態摘要 (讓失敗的檔透明)
+    if pull_result is not None:
+        html += "<h3>🔍 今日抓取狀態</h3>\n<table style='border-collapse:collapse'>\n"
+        for fund in FUNDS:
+            ok = pull_result.get(fund["code"], False)
+            emoji = "✅" if ok else "❌"
+            note = "" if ok else " <span style='color:#c33'>(見 console log)</span>"
+            html += f"<tr><td style='padding:2px 8px'>{emoji}</td><td style='padding:2px 8px'>{fund['code']}</td><td style='padding:2px 8px'>{fund['name']}</td><td style='padding:2px 8px'>{note}</td></tr>\n"
+        html += "</table>\n"
 
     if consensus_buy or consensus_sell or divergent:
         html += "<h3>🔥🔥 跨基金共識訊號 (≥2 檔同向)</h3>\n"
@@ -395,7 +418,9 @@ def main():
     print()
     cross_fund(day_dfs)
     print()
-    _write_email_diff(today)
+    # pull_result 傳給 email 顯示每檔抓取狀態
+    pull_result = {f["code"]: (f["code"] in day_dfs) for f in FUNDS}
+    _write_email_diff(today, pull_result=pull_result)
 
 
 if __name__ == "__main__":

@@ -84,14 +84,22 @@ def fetch(fund, d, retries=3):
     return None
 
 
-def parse(content):
-    """兩家格式通用:掃描含『代號』的表頭列,標準化為 代號/名稱/股數/權重。"""
-    raw = pd.read_excel(io.BytesIO(content), header=None)
+def parse(content, code=None):
+    """兩家格式通用:掃描含『代號』的表頭列,標準化為 代號/名稱/股數/權重。
+    失敗時 print 明確原因 (含 code 供 debug)。
+    """
+    tag = f"[{code}]" if code else ""
+    try:
+        raw = pd.read_excel(io.BytesIO(content), header=None)
+    except Exception as e:
+        print(f"  {tag} parse: Excel 讀不了 ({str(e)[:60]})")
+        return None
     hdr = None
     for i in range(min(30, len(raw))):
         if raw.iloc[i].astype(str).str.contains("代號").any():
             hdr = i; break
     if hdr is None:
+        print(f"  {tag} parse: 找不到「代號」表頭 (前 3 列: {raw.head(3).values.tolist()})")
         return None
     df = pd.read_excel(io.BytesIO(content), header=hdr)
 
@@ -102,6 +110,7 @@ def parse(content):
         return None
     ci, cn, cs, cw = col(["代號"]), col(["名稱"]), col(["股數"]), col(["權重", "比重"])
     if not (ci and cs):
+        print(f"  {tag} parse: 缺欄位 代號={ci} 股數={cs} (欄位: {list(df.columns)})")
         return None
     out = pd.DataFrame({
         "代號": df[ci].astype(str).str.replace(r"\.0$", "", regex=True).str.strip(),
@@ -109,7 +118,11 @@ def parse(content):
         "股數": pd.to_numeric(df[cs].astype(str).str.replace(",", ""), errors="coerce"),
         "權重": pd.to_numeric(df[cw].astype(str).str.replace("%", ""), errors="coerce") if cw else None,
     })
+    before = len(out)
     out = out[out["代號"].str.match(r"^\d{4}$")].dropna(subset=["股數"])
+    if out.empty:
+        print(f"  {tag} parse: filter 後空表 (原 {before} rows, 代號可能非 4 位數)")
+        return None
     return out.set_index("代號")
 
 
@@ -160,8 +173,9 @@ def pull_day(d):
         content = fetch(fund, d)
         if content is None:
             continue
-        cur = parse(content)
+        cur = parse(content, code=fund["code"])
         if cur is None or cur.empty:
+            print(f"  {fund['code']} parse 失敗, 跳過 (但 fetch 有拿到 bytes)")
             continue
         save_snapshot(fund["code"], d, cur)
         out[fund["code"]] = cur

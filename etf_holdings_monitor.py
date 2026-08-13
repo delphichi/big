@@ -26,11 +26,18 @@ OUTDIR = "data/etf_holdings"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
 # 主動式 ETF 監看清單(台股權益型;經理人選股)
+# house 類型:
+#   fhtrust  = 復華, /api/assetsExcel/{etf}/{YYYYMMDD}
+#   ezmoney  = 統一, /ETF/Transaction/PCFExcelNPOI?fundCode={fc}&date={ROC}
+#   direct   = 固定 URL (token 帶在裡面), 適用 CTBC 等. ⚠️ token 可能過期需重刷
 FUNDS = [
     {"code": "00991A", "name": "復華未來50",   "house": "fhtrust", "etf": "ETF23"},
     {"code": "00998A", "name": "復華金融股息", "house": "fhtrust", "etf": "ETF24"},
     {"code": "00981A", "name": "統一台股增長", "house": "ezmoney", "fc": "49YTW"},
     {"code": "00403A", "name": "統一升級50",   "house": "ezmoney", "fc": "63YTW"},
+    # ⚠️ TODO: 確認 code 對應的正式 ETF 代號; token 若過期需從網頁 F12 重刷
+    {"code": "00682450", "name": "中信 (待確認)", "house": "direct",
+     "url": "https://www.ctbcinvestments.com.tw/API/etf/DownloadETFHoldingWeight?token=bwWJTtJZjUg2CtlP%2FI%2BOPSEucozq0mi7b0iB1O6GpbLR9vuI5ZQqPCNcpXYgoQYLMTY0MzkyMTkyNjUyNjY4OA%3D%3D024"},
 ]
 
 
@@ -45,11 +52,17 @@ def fetch(fund, d):
         if fund["house"] == "fhtrust":
             url = f"https://www.fhtrust.com.tw/api/assetsExcel/{fund['etf']}/{d:%Y%m%d}"
             r = s.get(url, timeout=30)
+        elif fund["house"] == "direct":
+            # token 已在 URL 內, 無日期參數 → server 回最新持股
+            r = s.get(fund["url"], timeout=30)
         else:
             url = "https://www.ezmoney.com.tw/ETF/Transaction/PCFExcelNPOI"
             r = s.get(url, params={"fundCode": fund["fc"], "date": roc(d), "specificDate": "true"}, timeout=30)
         if r.status_code == 200 and len(r.content) > 500:
             return r.content
+        # direct 模式 若失敗大概是 token 過期
+        if fund["house"] == "direct":
+            print(f"  {fund['code']} direct URL 失敗 (HTTP {r.status_code}, 可能 token 過期需重刷)")
     except Exception as e:
         print(f"  {fund['code']} 抓取失敗:{str(e)[:60]}")
     return None

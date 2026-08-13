@@ -51,7 +51,12 @@ import time
 
 def fetch(fund, d, retries=3):
     """回傳 Excel bytes 或 None. 每檔都會 print 結果 (成功/失敗)."""
-    s = requests.Session(); s.headers["User-Agent"] = UA
+    s = requests.Session()
+    s.headers["User-Agent"] = UA
+    # 復華 fhtrust 需要 Referer 才穩 (不加會 RemoteDisconnected)
+    if fund["house"] == "fhtrust":
+        s.headers["Referer"] = "https://www.fhtrust.com.tw/"
+        s.headers["Accept"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, */*"
     last_err = None
     for attempt in range(retries):
         try:

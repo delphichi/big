@@ -1,49 +1,65 @@
-"""一次性探針: 抓 CTBC 期貨 (capfutures) ETF 頁面, 找 API/下載 URL."""
+"""一次性探針: 抓 CTBC 期貨 (capfutures) ETF SPA 頁面 + JS bundle, 找 API URL."""
 import re, sys, requests
 
-URL = "https://etf.capfutures.com/?view=holdings&fund=00406A"
+BASE = "https://etf.capfutures.com"
+URL = f"{BASE}/?view=holdings&fund=00406A"
 HDR = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,*/*",
     "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
 }
 
-def main():
-    try:
-        r = requests.get(URL, headers=HDR, timeout=30)
-    except Exception as e:
-        print(f"[FAIL] GET: {e}"); return 1
-    print(f"[STATUS] {r.status_code} len={len(r.content)}")
-    if r.status_code != 200:
-        print(r.text[:2000]); return 1
-    html = r.text
-    # 找 API / xhr / fetch / ajax / download / xlsx / csv / json endpoint
+def probe_endpoints(text, label):
+    """從 HTML 或 JS bundle 找 API endpoint / 下載 URL."""
     patterns = [
-        r"(?i)(?:url|href|src|action)\s*[:=]\s*['\"]([^'\"]{4,200})['\"]",
-        r"(?i)fetch\s*\(\s*['\"]([^'\"]+)['\"]",
-        r"(?i)ajax\s*\(\s*\{[^}]*url\s*:\s*['\"]([^'\"]+)['\"]",
-        r"(?i)(/[a-z0-9_\-/]+\.(?:xlsx|xls|csv|json|do|action|ashx))",
-        r"(?i)(/api/[a-z0-9_\-/]+)",
+        r'["\'`](https?://[^"\'`\s]+)["\'`]',
+        r'["\'`](/[a-zA-Z][a-zA-Z0-9_\-./]{3,120})["\'`]',
+        r'fetch\s*\(\s*["\'`]([^"\'`]+)["\'`]',
+        r'axios\.(?:get|post)\s*\(\s*["\'`]([^"\'`]+)["\'`]',
     ]
     found = set()
     for p in patterns:
-        for m in re.findall(p, html):
+        for m in re.findall(p, text):
             u = m if isinstance(m, str) else m[0]
-            if any(k in u.lower() for k in ("fund", "etf", "holding", "asset", "pcf", "excel", "xls", "download", "api", "component", "constituent", "weight", "00406", "406a")):
+            lu = u.lower()
+            if any(k in lu for k in ("fund", "etf", "holding", "asset", "pcf", "excel", "xls", "csv", "download", "api", "component", "constituent", "weight", "portfolio", "position", "capfutures", "406a", "00406", "券商", "持股", "成分")):
                 found.add(u)
-    print(f"[FOUND {len(found)} candidate URLs]")
+    print(f"[{label}: {len(found)} URLs matched]")
     for u in sorted(found):
         print(f"  {u}")
-    # 抓 <script src=...>
-    scripts = re.findall(r"<script[^>]+src=['\"]([^'\"]+)['\"]", html, re.I)
-    print(f"[SCRIPTS {len(scripts)}]")
-    for s in scripts[:20]:
-        print(f"  {s}")
-    # dump 前 3000 字節看 SPA 骨架
-    print("---HTML head 3000---")
-    print(html[:3000])
-    print("---HTML tail 2000---")
-    print(html[-2000:])
+    return found
+
+def main():
+    # 1) 抓 SPA 主頁
+    r = requests.get(URL, headers=HDR, timeout=30)
+    print(f"[HTML STATUS] {r.status_code} len={len(r.content)}")
+    if r.status_code != 200:
+        print(r.text[:2000]); return 1
+    scripts = re.findall(r"<script[^>]+src=['\"]([^'\"]+)['\"]", r.text, re.I)
+    probe_endpoints(r.text, "HTML")
+
+    # 2) 抓 JS bundle
+    for s in scripts:
+        js_url = s if s.startswith("http") else BASE + s
+        print(f"\n=== JS: {js_url} ===")
+        try:
+            jr = requests.get(js_url, headers=HDR, timeout=60)
+            print(f"[JS STATUS] {jr.status_code} len={len(jr.content)}")
+            if jr.status_code != 200: continue
+            js = jr.text
+            probe_endpoints(js, "JS")
+            # 額外: 找 "GET"/"POST" 附近的 URL 樣式
+            for m in re.finditer(r'(?:GET|POST|PUT|DELETE)["\'`,\s]{1,10}["\'`](https?://[^"\'`]+|/[^"\'`]+)["\'`]', js):
+                print(f"  [HTTP CALL] {m.group(0)[:200]}")
+            # 找關鍵字上下文
+            for kw in ("holding", "asset", "component", "portfolio", "constituent", "持股", "成分"):
+                for m in re.finditer(kw, js, re.I):
+                    ctx = js[max(0, m.start()-120):m.end()+120]
+                    if any(u in ctx for u in ("http", "/api/", "url:", "path:")):
+                        print(f"  [CTX '{kw}'] ...{ctx}...")
+                        break  # 一個關鍵字只印一次
+        except Exception as e:
+            print(f"[JS FAIL] {e}")
     return 0
 
 if __name__ == "__main__":

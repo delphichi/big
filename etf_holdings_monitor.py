@@ -70,8 +70,11 @@ def fetch(fund, d, retries=3):
                 if r.status_code == 405:
                     r = s.post(fund["url"], timeout=30)
             else:
-                url = "https://www.ezmoney.com.tw/ETF/Transaction/PCFExcelNPOI"
-                r = s.get(url, params={"fundCode": fund["fc"], "date": roc(d), "specificDate": "true"}, timeout=30)
+                # ezmoney: AssetExcelNPOI = 完整持股 (含股票/期貨/現金分頁)
+                # 舊 PCFExcelNPOI 只有申購買回籃 (主動 ETF 只回期貨), 不用了
+                s.headers["Referer"] = f"https://www.ezmoney.com.tw/ETF/Fund/Info?fundCode={fund['fc']}"
+                url = "https://www.ezmoney.com.tw/ETF/Fund/AssetExcelNPOI"
+                r = s.get(url, params={"fundCode": fund["fc"]}, timeout=30)
             if r.status_code == 200 and len(r.content) > 500:
                 print(f"  {fund['code']} ✓ 抓到 ({len(r.content)/1024:.1f}KB)")
                 return r.content

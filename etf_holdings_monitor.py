@@ -8,11 +8,16 @@
 
 資料源(本機被 proxy 擋,需在 CI 跑):
   復華 fhtrust : GET /api/assetsExcel/{etf}/{YYYYMMDD}      (Excel)
-  統一 ezmoney : GET /ETF/Transaction/PCFExcelNPOI?fundCode={fc}&date={ROC}&specificDate=true
+  統一 ezmoney : GET /ETF/Fund/AssetExcelNPOI?fundCode={fc} (Excel)
+  中信 direct  : GET /API/etf/DownloadETFHoldingWeight?token=... (Excel, token 會過期)
 
 每檔:存日期快照 data/etf_holdings/{code}_{YYYYMMDD}.csv → diff 最近兩日 →
   🟢新增成分 / 🔴剔除 / ⬆️⬇️增減碼。
 跨基金:🔥 多檔主動 ETF「同時新增/加碼同一股」= 法人共識(最強訊號)。
+
+第三方交叉驗證 (capfutures.com, MoneyDJ 為源):
+  GET https://etf.capfutures.com/api/holdings  一次回全部主動 ETF 持股
+  比對雙方 top10, 標的不同或權重差 > 0.5pp → 標記, 避免我方抓錯或投信頁面延遲
 """
 import os
 import io
@@ -152,6 +157,78 @@ def parse(content, code=None):
             errors.append(f"sheet「{sn}」→ 例外 {str(e)[:50]}")
     print(f"  {tag} parse 失敗 (試了 {len(xl.sheet_names)} 個 sheet): {'; '.join(errors)}")
     return None
+
+
+CAPFUTURES_URL = "https://etf.capfutures.com/api/holdings"
+
+
+def fetch_capfutures():
+    """一次抓 capfutures 全部主動 ETF 持股, 供交叉驗證用.
+    回傳 {code: {stockCode: {"name": ..., "weight": float, "shares": int}}} 或 None.
+    失敗不影響主流程 → 只回 None + print 警告.
+    """
+    try:
+        r = requests.get(CAPFUTURES_URL, headers={"User-Agent": UA, "Accept": "application/json"}, timeout=20)
+        if r.status_code != 200:
+            print(f"⚠️ capfutures 抓失敗 HTTP {r.status_code}")
+            return None
+        j = r.json()
+        funds = j.get("funds", {})
+        result = {}
+        for code, info in funds.items():
+            holdings = info.get("holdings", [])
+            result[code] = {
+                str(h["stockCode"]): {"name": h.get("stockName", ""),
+                                       "weight": float(h.get("weight", 0)),
+                                       "shares": int(h.get("shares", 0))}
+                for h in holdings if h.get("stockCode")
+            }
+        print(f"✓ capfutures 抓到 {len(result)} 檔 (dataDate 最新: {j.get('lastUpdated', '?')[:10]})")
+        return result
+    except Exception as e:
+        print(f"⚠️ capfutures 抓失敗: {str(e)[:100]}")
+        return None
+
+
+def cross_check_capfutures(day_dfs, cap_data, top_n=10, weight_tol=0.5):
+    """對每檔我方成功抓到的 ETF, 比對雙方 top_n 是否一致.
+    回傳 [{code, name, status, only_ours, only_cap, weight_diffs}]
+      status: "match" (top10 完全同) / "diff" (有差異) / "missing" (capfutures 沒此檔)
+    """
+    if not cap_data:
+        return []
+    nm = {f["code"]: f["name"] for f in FUNDS}
+    results = []
+    for code, df in day_dfs.items():
+        if code not in cap_data:
+            results.append({"code": code, "name": nm.get(code, ""),
+                            "status": "missing", "only_ours": [], "only_cap": [], "weight_diffs": []})
+            continue
+        cap = cap_data[code]
+        ours_top = df.nlargest(top_n, "權重") if "權重" in df.columns else df.head(top_n)
+        ours_top_codes = set(ours_top.index.astype(str))
+        cap_sorted = sorted(cap.items(), key=lambda x: -x[1]["weight"])[:top_n]
+        cap_top_codes = set(c for c, _ in cap_sorted)
+        only_ours = sorted(ours_top_codes - cap_top_codes)
+        only_cap = sorted(cap_top_codes - ours_top_codes)
+        weight_diffs = []
+        for s in ours_top_codes & cap_top_codes:
+            our_w = float(ours_top.loc[s, "權重"]) if pd.notna(ours_top.loc[s, "權重"]) else 0
+            cap_w = cap[s]["weight"]
+            if abs(our_w - cap_w) > weight_tol:
+                weight_diffs.append((s, cap[s]["name"], our_w, cap_w))
+        status = "match" if not (only_ours or only_cap or weight_diffs) else "diff"
+        results.append({"code": code, "name": nm.get(code, ""), "status": status,
+                        "only_ours": [(s, ours_top.loc[s, "名稱"] if s in ours_top.index else "") for s in only_ours],
+                        "only_cap": [(s, cap[s]["name"]) for s in only_cap],
+                        "weight_diffs": weight_diffs})
+    # 我方 fetch 失敗但 capfutures 有的 → 額外提示
+    for f in FUNDS:
+        if f["code"] not in day_dfs and f["code"] in cap_data:
+            results.append({"code": f["code"], "name": f["name"],
+                            "status": "our_fail_cap_has",
+                            "only_ours": [], "only_cap": [], "weight_diffs": []})
+    return results
 
 
 def snapshot_path(code, d):
@@ -324,10 +401,11 @@ def _collect_diff(today):
     return per_fund, buy, sell
 
 
-def _write_email_diff(today, pull_result=None):
+def _write_email_diff(today, pull_result=None, cap_check=None):
     """產出 /tmp/etf_diff_subject.txt + _body.html
     只有結構性變化 (新進/剔除/共識) 才寫 subject → workflow 判斷是否寄信
     pull_result: {code: bool} 每檔今日抓取結果 (True=成功, False=失敗)
+    cap_check: cross_check_capfutures() 回傳 list, 用於 email 交叉驗證區塊
     """
     per_fund, buy, sell = _collect_diff(today)
     if not per_fund:
@@ -339,14 +417,18 @@ def _write_email_diff(today, pull_result=None):
     consensus_sell = {s: v for s, v in sell.items() if len(set(v["funds"])) >= 2}
     divergent = {s: (buy[s], sell[s]) for s in set(buy) & set(sell)}
 
-    # 判斷是否值得寄信: 有共識/新進/剔除/建倉/大幅變動 (>= 50%)
+    # 判斷是否值得寄信: 有共識/新進/剔除/建倉/大幅變動 (>= 50%) / 第三方對照嚴重差異
     total_new = sum(len(f["new"]) for f in per_fund)
     total_drop = sum(len(f["drop"]) for f in per_fund)
     total_build = sum(1 for f in per_fund for c in f["chg"] if c[4])  # build flag
     total_big = sum(1 for f in per_fund for c in f["chg"]
                     if c[2] is not None and abs(c[2]) >= 50)
+    # 交叉驗證訊號: our_fail_cap_has (我方漏抓) 或 top10 有標的差異 (只算 only_ours/only_cap, 權重差不算)
+    cap_alert = sum(1 for c in (cap_check or []) if c["status"] == "our_fail_cap_has"
+                    or (c["status"] == "diff" and (c["only_ours"] or c["only_cap"])))
     worth_send = bool(consensus_buy or consensus_sell or divergent
-                      or total_new or total_drop or total_build or total_big)
+                      or total_new or total_drop or total_build or total_big
+                      or cap_alert)
     if not worth_send:
         print("⚠️ 今日僅小幅權重變化 (< 50%), 無結構性訊號, 不產 email")
         return
@@ -358,6 +440,7 @@ def _write_email_diff(today, pull_result=None):
     if total_drop: parts.append(f"{total_drop} 剔除")
     if total_build: parts.append(f"{total_build} 建倉")
     if total_big: parts.append(f"{total_big} 大幅動")
+    if cap_alert: parts.append(f"{cap_alert} 對照差異")
     subject = f"📊 主動 ETF 持股 diff — {' + '.join(parts)} ({today:%m/%d})"
     with open("/tmp/etf_diff_subject.txt", "w", encoding="utf-8") as f:
         f.write(subject)
@@ -375,6 +458,29 @@ def _write_email_diff(today, pull_result=None):
             emoji = "✅" if ok else "❌"
             note = "" if ok else " <span style='color:#c33'>(見 console log)</span>"
             html += f"<tr><td style='padding:2px 8px'>{emoji}</td><td style='padding:2px 8px'>{fund['code']}</td><td style='padding:2px 8px'>{fund['name']}</td><td style='padding:2px 8px'>{note}</td></tr>\n"
+        html += "</table>\n"
+
+    # 第三方交叉驗證 (capfutures.com / MoneyDJ)
+    if cap_check:
+        html += "<h3>🔎 第三方交叉驗證 <span style='color:#999;font-size:12px'>(vs capfutures.com, 源: MoneyDJ, 比對 top10)</span></h3>\n"
+        html += "<table style='border-collapse:collapse;width:100%;font-size:13px'>\n"
+        html += "<tr style='background:#f0f0f0'><th style='text-align:left;padding:4px'>結果</th><th style='text-align:left;padding:4px'>ETF</th><th style='text-align:left;padding:4px'>差異</th></tr>\n"
+        for c in cap_check:
+            if c["status"] == "match":
+                html += f"<tr><td style='padding:4px'>✅ 一致</td><td style='padding:4px'>{c['code']} {c['name']}</td><td style='padding:4px;color:#999'>top10 標的與權重皆吻合 (±0.5pp)</td></tr>\n"
+            elif c["status"] == "diff":
+                bits = []
+                if c["only_ours"]:
+                    bits.append("僅我方 top10: " + "、".join(f"{s}{n}" for s, n in c["only_ours"]))
+                if c["only_cap"]:
+                    bits.append("僅 capfutures top10: " + "、".join(f"{s}{n}" for s, n in c["only_cap"]))
+                if c["weight_diffs"]:
+                    bits.append("權重差 &gt;0.5pp: " + "、".join(f"{s}{n}(我{ow:.2f} vs 對{cw:.2f})" for s, n, ow, cw in c["weight_diffs"]))
+                html += f"<tr style='background:#fffbe0'><td style='padding:4px'>⚠️ 差異</td><td style='padding:4px'>{c['code']} {c['name']}</td><td style='padding:4px'>{' | '.join(bits)}</td></tr>\n"
+            elif c["status"] == "missing":
+                html += f"<tr><td style='padding:4px;color:#999'>➖ 無對照</td><td style='padding:4px'>{c['code']} {c['name']}</td><td style='padding:4px;color:#999'>capfutures 未收錄此檔</td></tr>\n"
+            elif c["status"] == "our_fail_cap_has":
+                html += f"<tr style='background:#fee'><td style='padding:4px'>🚨 我方 fail</td><td style='padding:4px'>{c['code']} {c['name']}</td><td style='padding:4px;color:#c33'>我方 fetch 失敗但 capfutures 有資料, 可查看 <a href='https://etf.capfutures.com/?view=holdings&fund={c['code']}'>對照頁</a></td></tr>\n"
         html += "</table>\n"
 
     if consensus_buy or consensus_sell or divergent:
@@ -460,9 +566,22 @@ def main():
     print()
     cross_fund(day_dfs)
     print()
+    # 第三方交叉驗證 (capfutures / MoneyDJ)
+    cap_data = fetch_capfutures()
+    cap_check = cross_check_capfutures(day_dfs, cap_data) if cap_data else []
+    if cap_check:
+        print("========== 🔎 第三方交叉驗證 (capfutures) ==========")
+        for c in cap_check:
+            icon = {"match": "✅", "diff": "⚠️", "missing": "➖", "our_fail_cap_has": "🚨"}[c["status"]]
+            print(f"  {icon} {c['code']} {c['name']}: {c['status']}", end="")
+            if c["only_ours"]: print(f" | 僅我方 top10: {[s for s,_ in c['only_ours']]}", end="")
+            if c["only_cap"]: print(f" | 僅 cap top10: {[s for s,_ in c['only_cap']]}", end="")
+            if c["weight_diffs"]: print(f" | 權重差: {[(s, f'我{ow:.1f}vs對{cw:.1f}') for s,_,ow,cw in c['weight_diffs']]}", end="")
+            print()
+        print()
     # pull_result 傳給 email 顯示每檔抓取狀態
     pull_result = {f["code"]: (f["code"] in day_dfs) for f in FUNDS}
-    _write_email_diff(today, pull_result=pull_result)
+    _write_email_diff(today, pull_result=pull_result, cap_check=cap_check)
 
 
 if __name__ == "__main__":

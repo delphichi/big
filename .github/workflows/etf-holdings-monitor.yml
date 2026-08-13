@@ -37,6 +37,33 @@ jobs:
           ETF_BACKFILL_DAYS: ${{ github.event.inputs.backfill_days }}
         run: python etf_holdings_monitor.py
 
+      - name: 檢查有無 diff 訊號
+        id: check
+        run: |
+          if [ -s /tmp/etf_diff_subject.txt ]; then
+            SUB=$(cat /tmp/etf_diff_subject.txt)
+            echo "subject=$SUB" >> $GITHUB_OUTPUT
+            echo "has=yes" >> $GITHUB_OUTPUT
+          else
+            echo "has=no" >> $GITHUB_OUTPUT
+            echo "無 diff 訊號, 不寄 email"
+          fi
+
+      - name: 寄 Gmail (有結構性變化才寄)
+        if: steps.check.outputs.has == 'yes'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: ${{ steps.check.outputs.subject }}
+          html_body: file:///tmp/etf_diff_body.html
+          to: delphichi@gmail.com
+          from: 主動 ETF diff <${{ secrets.GMAIL_USER }}>
+          convert_markdown: false
+
       - name: Commit 快照
         if: always()
         run: |

@@ -221,6 +221,134 @@ def week_report():
                 print(f"   {'⬆️加' if pct > 0 else '⬇️減'} {s}{n} {pct:+.0f}% (現權重{w}%)")
 
 
+def _collect_diff(today):
+    """收集每檔基金的 diff dict, 供 email/共識分析用
+    return: (per_fund [{code, name, prev_date, new, drop, chg}], buy_map, sell_map)
+    """
+    per_fund = []
+    buy, sell = {}, {}
+    for fund in FUNDS:
+        cur_f = snapshot_path(fund["code"], today)
+        if not os.path.exists(cur_f):
+            continue
+        cur = pd.read_csv(cur_f, dtype={"代號": str}).set_index("代號")
+        p = prev_snapshot(fund["code"], today)
+        if not p:
+            continue
+        prev, pname = p
+        new, drop, chg = diff(cur, prev)
+        per_fund.append({"code": fund["code"], "name": fund["name"],
+                         "prev": pname, "new": new, "drop": drop, "chg": chg})
+        for s, n, w in new:
+            buy.setdefault(s, {"name": n, "funds": []})["funds"].append(fund["name"])
+        for s, n, w in drop:
+            sell.setdefault(s, {"name": n, "funds": []})["funds"].append(fund["name"])
+        for s, n, pct, w, build in chg[:5]:
+            if build:
+                buy.setdefault(s, {"name": n, "funds": []})["funds"].append(fund["name"])
+            elif pct and pct > 20:
+                buy.setdefault(s, {"name": n, "funds": []})["funds"].append(fund["name"])
+            elif pct and pct < -20:
+                sell.setdefault(s, {"name": n, "funds": []})["funds"].append(fund["name"])
+    return per_fund, buy, sell
+
+
+def _write_email_diff(today):
+    """產出 /tmp/etf_diff_subject.txt + _body.html
+    只有結構性變化 (新進/剔除/共識) 才寫 subject → workflow 判斷是否寄信
+    """
+    per_fund, buy, sell = _collect_diff(today)
+    if not per_fund:
+        print("⚠️ 無 diff 資料 (可能是第一次跑, 沒 prev), 不產 email")
+        return
+
+    # 共識 (≥2 檔同方向)
+    consensus_buy = {s: v for s, v in buy.items() if len(set(v["funds"])) >= 2}
+    consensus_sell = {s: v for s, v in sell.items() if len(set(v["funds"])) >= 2}
+    divergent = {s: (buy[s], sell[s]) for s in set(buy) & set(sell)}
+
+    # 判斷是否值得寄信: 有共識 OR 有任一新進/剔除
+    total_new = sum(len(f["new"]) for f in per_fund)
+    total_drop = sum(len(f["drop"]) for f in per_fund)
+    worth_send = bool(consensus_buy or consensus_sell or divergent or total_new or total_drop)
+    if not worth_send:
+        print("⚠️ 今日僅小幅權重變化, 無結構性訊號, 不產 email")
+        return
+
+    parts = []
+    if consensus_buy: parts.append(f"{len(consensus_buy)} 共識加碼")
+    if consensus_sell: parts.append(f"{len(consensus_sell)} 共識減碼")
+    if total_new: parts.append(f"{total_new} 新進")
+    if total_drop: parts.append(f"{total_drop} 剔除")
+    subject = f"📊 主動 ETF 持股 diff — {' + '.join(parts) or '結構變化'} ({today:%m/%d})"
+    with open("/tmp/etf_diff_subject.txt", "w", encoding="utf-8") as f:
+        f.write(subject)
+
+    html = f"""<html><body style='font-family:-apple-system,sans-serif;max-width:900px'>
+<h2>📊 主動式 ETF 持股 diff ({today:%Y-%m-%d})</h2>
+<p style='color:#666'>對比昨日, 追蹤 {len(per_fund)} 檔基金經理人動向</p>
+"""
+
+    if consensus_buy or consensus_sell or divergent:
+        html += "<h3>🔥🔥 跨基金共識訊號 (≥2 檔同向)</h3>\n"
+        if consensus_buy:
+            html += "<div style='background:#e8f7e8;padding:10px;border-left:4px solid #2a2;margin:8px 0'>"
+            html += "<b>🟢 共識加碼</b><ul>\n"
+            for s, v in consensus_buy.items():
+                html += f"<li><b>{s} {v['name']}</b> — {'/'.join(set(v['funds']))}</li>\n"
+            html += "</ul></div>\n"
+        if consensus_sell:
+            html += "<div style='background:#fee;padding:10px;border-left:4px solid #c33;margin:8px 0'>"
+            html += "<b>🔴 共識減碼</b><ul>\n"
+            for s, v in consensus_sell.items():
+                html += f"<li><b>{s} {v['name']}</b> — {'/'.join(set(v['funds']))}</li>\n"
+            html += "</ul></div>\n"
+        if divergent:
+            html += "<div style='background:#fffbe0;padding:10px;border-left:4px solid #fa0;margin:8px 0'>"
+            html += "<b>⚖️ 分歧 (有人買有人砍)</b><ul>\n"
+            for s, (b_info, s_info) in divergent.items():
+                nm = b_info["name"] or s_info["name"]
+                html += f"<li><b>{s} {nm}</b> — 買:{'/'.join(set(b_info['funds']))} | 砍:{'/'.join(set(s_info['funds']))}</li>\n"
+            html += "</ul></div>\n"
+
+    html += "<h3>📋 各基金個別變化</h3>\n"
+    for f in per_fund:
+        rows = []
+        for s, n, w in f["new"]:
+            rows.append(f"<tr><td>🟢 新進</td><td>{s}</td><td>{n}</td><td style='text-align:right'>{w}%</td></tr>")
+        for s, n, w in f["drop"]:
+            rows.append(f"<tr><td>🔴 剔除</td><td>{s}</td><td>{n}</td><td style='text-align:right'>(原 {w}%)</td></tr>")
+        for s, n, pct, w, build in f["chg"][:8]:
+            if build:
+                rows.append(f"<tr><td>🆕 建倉</td><td>{s}</td><td>{n}</td><td style='text-align:right'>權重 {w}%</td></tr>")
+            elif pct and abs(pct) >= 10:
+                arrow = "⬆️加" if pct > 0 else "⬇️減"
+                rows.append(f"<tr><td>{arrow}</td><td>{s}</td><td>{n}</td><td style='text-align:right'>{pct:+.0f}% (權 {w}%)</td></tr>")
+        if not rows:
+            html += f"<h4>{f['code']} {f['name']}</h4><p style='color:#999'>(無顯著變化)</p>"
+            continue
+        html += f"<h4>{f['code']} {f['name']} <span style='color:#999;font-size:12px'>vs {f['prev']}</span></h4>\n"
+        html += "<table style='border-collapse:collapse;width:100%'><tr style='background:#f0f0f0'>"
+        html += "<th style='text-align:left;padding:4px'>動作</th><th style='text-align:left;padding:4px'>代號</th>"
+        html += "<th style='text-align:left;padding:4px'>名稱</th><th style='text-align:right;padding:4px'>幅度</th></tr>\n"
+        html += "\n".join(rows)
+        html += "</table>\n"
+
+    html += """
+<div style='background:#f5f5ff;padding:12px;border-left:4px solid #55b;font-size:13px;margin-top:16px'>
+<h4>📖 判讀說明</h4>
+<p><b>🔥🔥 共識訊號</b>: 2 檔以上基金同時買/砍同檔 → 法人共識 (最值得跟)</p>
+<p><b>⚖️ 分歧</b>: 一買一砍 → 各家看法不同, 可深入研究</p>
+<p><b>🆕 建倉</b>: 新加入或原本權重 &lt; 0.1% → 經理人首次投入</p>
+<p><b>⬆️加/⬇️減</b>: 顯示 &gt;= 10% 的變化, 過濾雜訊</p>
+</div>
+</body></html>"""
+
+    with open("/tmp/etf_diff_body.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"→ /tmp/etf_diff_subject.txt + _body.html ({subject})")
+
+
 def main():
     backfill = int(os.environ.get("ETF_BACKFILL_DAYS", "0") or "0")
     if backfill > 0:
@@ -243,6 +371,8 @@ def main():
     diff_consensus(today)
     print()
     cross_fund(day_dfs)
+    print()
+    _write_email_diff(today)
 
 
 if __name__ == "__main__":

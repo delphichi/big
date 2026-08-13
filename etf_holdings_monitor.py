@@ -162,12 +162,26 @@ def parse(content, code=None):
 CAPFUTURES_URL = "https://etf.capfutures.com/api/holdings"
 
 
+def _holdings_list_to_dict(holdings):
+    """[{stockCode, stockName, weight, shares}, ...] → {code: {name, weight, shares}}"""
+    return {
+        str(h["stockCode"]): {"name": h.get("stockName", ""),
+                               "weight": float(h.get("weight", 0)),
+                               "shares": int(h.get("shares", 0))}
+        for h in (holdings or []) if h.get("stockCode")
+    }
+
+
 def fetch_capfutures():
-    """一次抓 capfutures 全部主動 ETF 持股, 供交叉驗證用.
-    回傳 {code: {stockCode: {"name": ..., "weight": float, "shares": int}}} 或 None.
-    失敗不影響主流程 → 只回 None + print 警告.
+    """一次抓 capfutures 全部主動 ETF 持股 + 前日快照, 供交叉驗證 + email 補位.
+    回傳 {
+      "today":     {code: {stockCode: {name, weight, shares}}},
+      "prev":      {code: {stockCode: {name, weight, shares}}},  # 空 dict = 沒 prev
+      "prev_dates":{code: "YYYY-MM-DD"},
+      "meta":      {code: {name, dataDate, source_url}},
+      "last_updated": ISO string
+    } 或 None. 失敗不影響主流程.
     """
-    # 完整 browser-like headers, 只帶最少會被 WAF 擋 (實測 CI 環境需要 Referer/Origin/Accept-Language)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
@@ -182,37 +196,66 @@ def fetch_capfutures():
             return None
         j = r.json()
         funds = j.get("funds", {})
-        result = {}
+        prev_all = j.get("previousHoldings", {}) or {}
+        prev_dates = j.get("previousDates", {}) or {}
+        source_urls = j.get("sourceUrls", {}) or {}
+        today, prev, meta = {}, {}, {}
         for code, info in funds.items():
-            holdings = info.get("holdings", [])
-            result[code] = {
-                str(h["stockCode"]): {"name": h.get("stockName", ""),
-                                       "weight": float(h.get("weight", 0)),
-                                       "shares": int(h.get("shares", 0))}
-                for h in holdings if h.get("stockCode")
-            }
-        print(f"✓ capfutures 抓到 {len(result)} 檔 (dataDate 最新: {j.get('lastUpdated', '?')[:10]})")
-        return result
+            today[code] = _holdings_list_to_dict(info.get("holdings", []))
+            p_raw = prev_all.get(code)
+            # previousHoldings 可能是 list of holdings 或 {holdings: [...]}
+            if isinstance(p_raw, dict):
+                p_raw = p_raw.get("holdings", [])
+            prev[code] = _holdings_list_to_dict(p_raw) if p_raw else {}
+            meta[code] = {"name": info.get("name", ""),
+                          "dataDate": info.get("dataDate", ""),
+                          "source_url": source_urls.get(code, "")}
+        print(f"✓ capfutures 抓到 {len(today)} 檔 (dataDate 最新: {j.get('lastUpdated', '?')[:10]}, 有 prev: {sum(1 for p in prev.values() if p)})")
+        return {"today": today, "prev": prev, "prev_dates": prev_dates,
+                "meta": meta, "last_updated": j.get("lastUpdated", "")}
     except Exception as e:
         print(f"⚠️ capfutures 抓失敗: {str(e)[:100]}")
         return None
 
 
+def cap_diff(today, prev, top_show=3):
+    """對 capfutures 兩份持股算 diff. 回傳 (new, drop, big_chg).
+    new/drop: [(code, name, weight)]  big_chg: [(code, name, delta_shares_pct, weight)]
+    """
+    if not prev:
+        return [], [], []
+    sa, sb = set(prev.keys()), set(today.keys())
+    new = sorted([(s, today[s]["name"], today[s]["weight"]) for s in sb - sa],
+                 key=lambda x: -x[2])
+    drop = sorted([(s, prev[s]["name"], prev[s]["weight"]) for s in sa - sb],
+                  key=lambda x: -x[2])
+    chg = []
+    for s in sa & sb:
+        p0, c0 = prev[s]["shares"], today[s]["shares"]
+        if not p0: continue
+        pct = (c0 - p0) / p0 * 100
+        if abs(pct) >= 20:  # 只顯示 >=20% 變化
+            chg.append((s, today[s]["name"], pct, today[s]["weight"]))
+    chg.sort(key=lambda x: abs(x[2]), reverse=True)
+    return new, drop, chg
+
+
 def cross_check_capfutures(day_dfs, cap_data, top_n=10, weight_tol=0.5):
     """對每檔我方成功抓到的 ETF, 比對雙方 top_n 是否一致.
     回傳 [{code, name, status, only_ours, only_cap, weight_diffs}]
-      status: "match" (top10 完全同) / "diff" (有差異) / "missing" (capfutures 沒此檔)
+      status: "match" / "diff" / "missing" / "our_fail_cap_has"
     """
     if not cap_data:
         return []
+    cap_today = cap_data["today"] if isinstance(cap_data, dict) and "today" in cap_data else cap_data
     nm = {f["code"]: f["name"] for f in FUNDS}
     results = []
     for code, df in day_dfs.items():
-        if code not in cap_data:
+        if code not in cap_today:
             results.append({"code": code, "name": nm.get(code, ""),
                             "status": "missing", "only_ours": [], "only_cap": [], "weight_diffs": []})
             continue
-        cap = cap_data[code]
+        cap = cap_today[code]
         ours_top = df.nlargest(top_n, "權重") if "權重" in df.columns else df.head(top_n)
         ours_top_codes = set(ours_top.index.astype(str))
         cap_sorted = sorted(cap.items(), key=lambda x: -x[1]["weight"])[:top_n]
@@ -232,7 +275,7 @@ def cross_check_capfutures(day_dfs, cap_data, top_n=10, weight_tol=0.5):
                         "weight_diffs": weight_diffs})
     # 我方 fetch 失敗但 capfutures 有的 → 額外提示
     for f in FUNDS:
-        if f["code"] not in day_dfs and f["code"] in cap_data:
+        if f["code"] not in day_dfs and f["code"] in cap_today:
             results.append({"code": f["code"], "name": f["name"],
                             "status": "our_fail_cap_has",
                             "only_ours": [], "only_cap": [], "weight_diffs": []})
@@ -409,15 +452,16 @@ def _collect_diff(today):
     return per_fund, buy, sell
 
 
-def _write_email_diff(today, pull_result=None, cap_check=None):
+def _write_email_diff(today, pull_result=None, cap_check=None, cap_data=None):
     """產出 /tmp/etf_diff_subject.txt + _body.html
     只有結構性變化 (新進/剔除/共識) 才寫 subject → workflow 判斷是否寄信
     pull_result: {code: bool} 每檔今日抓取結果 (True=成功, False=失敗)
-    cap_check: cross_check_capfutures() 回傳 list, 用於 email 交叉驗證區塊
+    cap_check:   cross_check_capfutures() 回傳 list, 用於 email 交叉驗證區塊
+    cap_data:    fetch_capfutures() 回傳 dict, 用於 email 全景 + 補位資料
     """
     per_fund, buy, sell = _collect_diff(today)
-    if not per_fund:
-        print("⚠️ 無 diff 資料 (可能是第一次跑, 沒 prev), 不產 email")
+    if not per_fund and not cap_data:
+        print("⚠️ 無 diff 資料且無 capfutures 對照, 不產 email")
         return
 
     # 共識 (≥2 檔同方向)
@@ -536,6 +580,47 @@ def _write_email_diff(today, pull_result=None, cap_check=None):
         html += "\n".join(rows)
         html += "</table>\n"
 
+    # ─── capfutures 全景: 22 檔 top10 + 昨日 diff (第三方 MoneyDJ 為源, 我方 fail 時也有資料) ───
+    if cap_data:
+        cap_today = cap_data["today"]
+        cap_prev = cap_data["prev"]
+        cap_meta = cap_data["meta"]
+        cap_prev_dates = cap_data["prev_dates"]
+        our_codes = {f["code"] for f in FUNDS}
+        # 排序: 我方監看的排前, 其他排後; 我方 fail 的加標
+        our_fail = {c["code"] for c in (cap_check or []) if c["status"] == "our_fail_cap_has"}
+        ordered = ([c for c in cap_today if c in our_codes] +
+                   [c for c in cap_today if c not in our_codes])
+        html += f"""<h3>📊 capfutures 全景 <span style='color:#999;font-size:12px'>({len(cap_today)} 檔 top10 + diff, 源: {cap_data['last_updated'][:10]} MoneyDJ)</span></h3>
+<p style='color:#666;font-size:13px'>市面上所有主動 ETF, 我方監看清單以外的檔位可觀察是否有意外共識 / 建倉訊號.</p>
+"""
+        for code in ordered:
+            cap = cap_today[code]
+            if not cap: continue
+            info = cap_meta.get(code, {})
+            name = info.get("name", "")
+            is_ours = code in our_codes
+            fail_tag = " <span style='background:#c33;color:#fff;padding:1px 6px;border-radius:3px;font-size:11px'>我方 fail, 用此補位</span>" if code in our_fail else ""
+            ours_tag = " <span style='color:#28a;font-size:11px'>(監看中)</span>" if is_ours and code not in our_fail else ""
+            html += f"<h4 style='margin:14px 0 4px'>{code} {name}{ours_tag}{fail_tag}</h4>\n"
+            # diff (若有 prev)
+            prev = cap_prev.get(code, {})
+            if prev:
+                new, drop, chg = cap_diff(cap, prev, top_show=3)
+                bits = []
+                if new: bits.append("🟢 新進: " + "、".join(f"{s}{n}({w}%)" for s, n, w in new[:5]))
+                if drop: bits.append("🔴 剔除: " + "、".join(f"{s}{n}(原{w}%)" for s, n, w in drop[:5]))
+                if chg: bits.append("⬆️⬇️ 變動: " + "、".join(f"{s}{n}{p:+.0f}%" for s, n, p, w in chg[:5]))
+                if bits:
+                    prev_d = cap_prev_dates.get(code, "?")[:10]
+                    html += f"<p style='margin:2px 0;font-size:13px;color:#456'>vs {prev_d}: {' | '.join(bits)}</p>\n"
+            # top10 持股
+            top10 = sorted(cap.items(), key=lambda x: -x[1]["weight"])[:10]
+            html += "<table style='border-collapse:collapse;font-size:12px'>\n"
+            for s, h in top10:
+                html += f"<tr><td style='padding:1px 8px'>{s}</td><td style='padding:1px 8px'>{h['name']}</td><td style='padding:1px 8px;text-align:right;color:#666'>{h['weight']:.2f}%</td></tr>\n"
+            html += "</table>\n"
+
     html += """
 <div style='background:#f5f5ff;padding:12px;border-left:4px solid #55b;font-size:13px;margin-top:16px'>
 <h4>📖 判讀說明</h4>
@@ -543,6 +628,7 @@ def _write_email_diff(today, pull_result=None, cap_check=None):
 <p><b>⚖️ 分歧</b>: 一買一砍 → 各家看法不同, 可深入研究</p>
 <p><b>🆕 建倉</b>: 新加入或原本權重 &lt; 0.1% → 經理人首次投入</p>
 <p><b>⬆️加/⬇️減</b>: 顯示 &gt;= 10% 的變化, 過濾雜訊</p>
+<p><b>📊 capfutures 全景</b>: 第三方 (MoneyDJ 為源) 資料, 包含市面上全部主動 ETF; 我方 fail 的檔位以此為補位</p>
 </div>
 </body></html>"""
 
@@ -589,7 +675,7 @@ def main():
         print()
     # pull_result 傳給 email 顯示每檔抓取狀態
     pull_result = {f["code"]: (f["code"] in day_dfs) for f in FUNDS}
-    _write_email_diff(today, pull_result=pull_result, cap_check=cap_check)
+    _write_email_diff(today, pull_result=pull_result, cap_check=cap_check, cap_data=cap_data)
 
 
 if __name__ == "__main__":

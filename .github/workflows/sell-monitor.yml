@@ -4,7 +4,7 @@ on:
   workflow_dispatch:          # 可單獨手動測試(只跑 portfolio.yaml 的持倉,7 檔秒跑)
   schedule:
     # 09:10 UTC = 台北 17:10(收盤後,接在買點監看之後);週一~週五
-    - cron: "10 9 * * 1-5"
+     #- cron: "10 9 * * 1-5"
 
 permissions:
   contents: write

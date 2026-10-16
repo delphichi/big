@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     # 09:00 UTC = 台北 17:00(收盤後,PER 已更新);週一~週五
-    - cron: "0 9 * * 1-5"
+    # - cron: "0 9 * * 1-5"
 
 permissions:
   contents: write

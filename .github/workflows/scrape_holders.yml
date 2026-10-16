@@ -2,7 +2,7 @@ name: 每週千張大戶自動爬取
 
 on:
   schedule:
-    - cron: '30 10 * * 5'   # 每週五 18:30 台灣時間
+   #  - cron: '30 10 * * 5'   # 每週五 18:30 台灣時間
   workflow_dispatch:
     inputs:
       stocks:

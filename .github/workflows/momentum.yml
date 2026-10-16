@@ -7,7 +7,7 @@ on:
     # GitHub cron 用 UTC。06:30 UTC = 台北 14:30(收盤後約一小時)
     # 只用股價、資料輕,故每個交易日都跑;1-5 = 週一到週五(週末不開盤)
     # 註:GitHub cron 不認台股假日,遇休市日會重抓到同一份資料,無害
-    - cron: "30 6 * * 1-5"
+   #  - cron: "30 6 * * 1-5"
 
 permissions:
   contents: write             # 若要 commit 回 repo 留存歷史

@@ -5,7 +5,7 @@ on:
   schedule:
     # 每工作日台北 08:30 (週一至週五 UTC 00:30)
     # 週日 20:00 UTC = 週一 04:00 台北 (太早, 改早上)
-    - cron: "30 0 * * 1-5"
+   #  - cron: "30 0 * * 1-5"
 
 permissions:
   contents: write

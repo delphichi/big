@@ -9,7 +9,7 @@ on:
         default: ""
   schedule:
     # 台北每個交易日 14:00 (UTC 06:00),台股 13:30 收盤後 30 分
-    - cron: "0 6 * * 1,2,3,4,5"
+    # - cron: "0 6 * * 1,2,3,4,5"
 
 permissions:
   contents: write
